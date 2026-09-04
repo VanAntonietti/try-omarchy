@@ -12,4 +12,8 @@ The initial envelope vocabulary is:
 - `cancel`: the request identifier to cancel
 - `event`: a typed, content-free invalidation or session event
 
-`session.hello` is the first request and negotiates protocol version and capabilities. Method schemas and stricter per-method limits will be added by the bounded Calendar spike; neither implementation may turn this transport into arbitrary host execution.
+`session.hello` must be the first accepted request. Its parameters name the guest client and the major/minor protocol version it supports. Peers with major version 1 negotiate the lower supported minor version and ignore unknown additive fields; another major or a malformed hello makes Link unavailable without failing the VM.
+
+The host derives advertised Capabilities from its launch-fixed Service Modes. Off advertises none, Read advertises only named queries, and Read & Write adds only named Mutation Proposal operations. Client-supplied fields cannot add Capabilities. The current fake policy is captured in `handshake-fixtures.json`; it exposes only Calendar, Messages, and Notes operations and no shell, SQL, file, script, or generic dispatch surface.
+
+`session.handshake_required`, `session.invalid_handshake`, and `session.unsupported_protocol` are typed handshake failures. The Swift host and Rust guest consume the shared fixtures, but the daemon, VM channel, and real Mac Service adapters remain unimplemented.

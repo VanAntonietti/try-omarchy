@@ -1,3 +1,10 @@
+mod session;
+
+pub use session::{
+    ClientIdentity, GuestSession, GuestSessionState, NegotiatedSession, ProtocolVersion,
+    SessionFailure,
+};
+
 use serde_json::Value;
 use std::fmt;
 

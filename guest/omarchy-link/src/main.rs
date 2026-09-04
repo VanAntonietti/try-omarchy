@@ -14,7 +14,7 @@ fn main() -> ExitCode {
                 json!({
                     "available": false,
                     "protocol": { "major": 1, "minor": 0 },
-                    "reason": "protocol scaffold only"
+                    "reason": "fake session negotiation only"
                 })
             );
             ExitCode::SUCCESS
