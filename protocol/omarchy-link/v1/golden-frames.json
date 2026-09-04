@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "maximumFrameBytes": 4194304,
+  "cases": [
+    {
+      "name": "session hello request",
+      "payload": {
+        "id": "req-0001",
+        "method": "session.hello",
+        "params": {
+          "client": {
+            "name": "omarchy-link",
+            "version": "0.0.1"
+          },
+          "protocol": {
+            "major": 1,
+            "minor": 0
+          }
+        },
+        "type": "request"
+      },
+      "frameHex": "0000009a7b226964223a227265712d30303031222c226d6574686f64223a2273657373696f6e2e68656c6c6f222c22706172616d73223a7b22636c69656e74223a7b226e616d65223a226f6d61726368792d6c696e6b222c2276657273696f6e223a22302e302e31227d2c2270726f746f636f6c223a7b226d616a6f72223a312c226d696e6f72223a307d7d2c2274797065223a2272657175657374227d"
+    },
+    {
+      "name": "calendar events list request uses UTF-8 byte length",
+      "payload": {
+        "id": "req-0002",
+        "method": "calendar.events.list",
+        "params": {
+          "calendarName": "Café",
+          "from": "2026-09-07T00:00:00-03:00",
+          "through": "2026-09-14T00:00:00-03:00"
+        },
+        "type": "request"
+      },
+      "frameHex": "000000ad7b226964223a227265712d30303032222c226d6574686f64223a2263616c656e6461722e6576656e74732e6c697374222c22706172616d73223a7b2263616c656e6461724e616d65223a22436166c3a9222c2266726f6d223a22323032362d30392d30375430303a30303a30302d30333a3030222c227468726f756768223a22323032362d30392d31345430303a30303a30302d30333a3030227d2c2274797065223a2272657175657374227d"
+    }
+  ]
+}

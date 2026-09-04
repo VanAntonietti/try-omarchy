@@ -23,6 +23,11 @@ code.
   pinned in `guest/spec.json` and built natively for ARM64. Its packaged
   `LICENSE` and `NOTICE` retain attribution to TerminalTextEffects and
   ChrisBuilds.
+- **Omarchy Link Rust dependencies** — Serde, serde_json, and their transitive
+  crates retain their respective MIT, Apache-2.0, and Unicode licenses. Exact
+  versions and registry checksums are locked in `guest/omarchy-link/Cargo.lock`;
+  reviewed source and license files are retained under
+  `guest/omarchy-link/vendor/`.
 - **yay** — GPL-3.0-or-later; the official ARM64 release and its versioned
   license are pinned in `guest/spec.json` and packaged into the guest's local
   repository.
