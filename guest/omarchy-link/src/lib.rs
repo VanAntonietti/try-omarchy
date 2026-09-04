@@ -1,8 +1,8 @@
 mod session;
 
 pub use session::{
-    ClientIdentity, GuestSession, GuestSessionState, NegotiatedSession, ProtocolVersion,
-    SessionFailure,
+    CapabilityName, ClientIdentity, GuestSession, GuestSessionState, NegotiatedSession,
+    ProtocolVersion, SessionFailure, SessionFailureCode,
 };
 
 use serde_json::Value;

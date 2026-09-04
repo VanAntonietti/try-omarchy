@@ -1,5 +1,6 @@
 use omarchy_link::{
-    ClientIdentity, GuestSession, GuestSessionState, NegotiatedSession, ProtocolVersion,
+    CapabilityName, ClientIdentity, GuestSession, GuestSessionState, NegotiatedSession,
+    ProtocolVersion, SessionFailure, SessionFailureCode,
 };
 use serde_json::Value;
 
@@ -87,7 +88,7 @@ fn rust_guest_accepts_shared_mode_filtered_handshakes_and_additive_fields() {
             .as_array()
             .expect("capabilities must be an array")
             .iter()
-            .map(string_at)
+            .map(|value| CapabilityName::from(string_at(value)))
             .collect();
 
         assert_eq!(
@@ -126,14 +127,42 @@ fn rust_guest_reports_shared_handshake_failures_as_link_unavailable() {
 
         assert_eq!(
             guest.accept_handshake(&case["expectedResponse"]),
-            &GuestSessionState::LinkUnavailable(omarchy_link::SessionFailure {
-                code: string_at(&expected_error["code"]),
+            &GuestSessionState::LinkUnavailable(SessionFailure {
+                code: SessionFailureCode::from(string_at(&expected_error["code"])),
                 message: string_at(&expected_error["message"]),
             }),
             "case: {}",
             case["name"]
         );
     }
+}
+
+#[test]
+fn rust_guest_handshake_state_is_terminal() {
+    let fixture: Value = serde_json::from_str(FIXTURE).expect("handshake fixture must be JSON");
+    let compatible = &fixture["compatibleCases"][0];
+    let hello = &compatible["hello"];
+    let request_id = string_at(&hello["id"]);
+    let client = ClientIdentity {
+        name: string_at(&hello["params"]["client"]["name"]),
+        version: string_at(&hello["params"]["client"]["version"]),
+    };
+    let protocol = version_at(&hello["params"]["protocol"]);
+    let mut unavailable_response = fixture["unavailableCases"][0]["expectedResponse"].clone();
+    unavailable_response["id"] = Value::String(request_id.clone());
+
+    let mut available_guest =
+        GuestSession::new(request_id.clone(), client.clone(), protocol.clone());
+    available_guest.accept_handshake(&compatible["expectedResponse"]);
+    let available = available_guest.state().clone();
+    available_guest.accept_handshake(&unavailable_response);
+    assert_eq!(available_guest.state(), &available);
+
+    let mut unavailable_guest = GuestSession::new(request_id, client, protocol);
+    unavailable_guest.accept_handshake(&unavailable_response);
+    let unavailable = unavailable_guest.state().clone();
+    unavailable_guest.accept_handshake(&compatible["expectedResponse"]);
+    assert_eq!(unavailable_guest.state(), &unavailable);
 }
 
 fn version_at(value: &Value) -> ProtocolVersion {

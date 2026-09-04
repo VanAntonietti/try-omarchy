@@ -41,6 +41,7 @@ struct OmarchyLinkNegotiatedSession: Equatable {
 }
 
 enum OmarchyLinkSessionFailureCode: String, Equatable {
+    case handshakeAlreadyComplete = "session.handshake_already_complete"
     case handshakeRequired = "session.handshake_required"
     case invalidHandshake = "session.invalid_handshake"
     case unsupportedProtocol = "session.unsupported_protocol"
@@ -112,6 +113,10 @@ struct OmarchyLinkHostSession {
     }
 
     mutating func receive(_ payload: Data) -> OmarchyLinkHostReply {
+        if status != .awaitingHandshake {
+            return terminalReply(for: payload)
+        }
+
         guard let envelope = try? JSONDecoder().decode(RequestEnvelope.self, from: payload),
               envelope.type == "request",
               !envelope.id.isEmpty,
@@ -164,7 +169,27 @@ struct OmarchyLinkHostSession {
         status = .available(negotiated)
         return OmarchyLinkHostReply(
             status: status,
-            message: .response(id: hello.id, session: negotiated)
+            message: .response(id: envelope.id, session: negotiated)
+        )
+    }
+
+    private func terminalReply(for payload: Data) -> OmarchyLinkHostReply {
+        let id = (try? JSONDecoder().decode(RequestEnvelope.self, from: payload))?.id
+        let failure: OmarchyLinkSessionFailure
+        switch status {
+        case .available:
+            failure = OmarchyLinkSessionFailure(
+                code: .handshakeAlreadyComplete,
+                message: "The Omarchy Link session handshake is already complete"
+            )
+        case .unavailable(let unavailableFailure):
+            failure = unavailableFailure
+        case .awaitingHandshake:
+            preconditionFailure("terminalReply requires a completed handshake")
+        }
+        return OmarchyLinkHostReply(
+            status: status,
+            message: .error(id: id, failure: failure)
         )
     }
 
@@ -221,9 +246,6 @@ private struct RequestEnvelope: Decodable {
 }
 
 private struct HelloRequest: Decodable {
-    let type: String
-    let id: String
-    let method: String
     let params: Parameters
 
     struct Parameters: Decodable {

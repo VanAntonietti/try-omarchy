@@ -95,6 +95,28 @@ struct OmarchyLinkSessionTests {
         }
     }
 
+    @Test("a Link Session cannot renegotiate after becoming available or unavailable")
+    func handshakeStateIsTerminal() throws {
+        let fixture = try loadHandshakeFixture()
+        let compatibleCases = try #require(fixture["compatibleCases"] as? [[String: Any]])
+        let unavailableCases = try #require(fixture["unavailableCases"] as? [[String: Any]])
+        let compatible = try #require(compatibleCases.first)
+        let unsupported = try #require(unavailableCases.first)
+        let modes = try serviceModes(from: compatible)
+        let hello = try #require(compatible["hello"] as? [String: Any])
+        let unsupportedHello = try #require(unsupported["hello"] as? [String: Any])
+
+        var availableHost = OmarchyLinkHostSession(serviceModes: modes)
+        let availableStatus = availableHost.receive(try jsonData(hello)).status
+        let statusAfterAnotherHello = availableHost.receive(try jsonData(unsupportedHello)).status
+        #expect(statusAfterAnotherHello == availableStatus)
+
+        var unavailableHost = OmarchyLinkHostSession(serviceModes: modes)
+        let unavailableStatus = unavailableHost.receive(try jsonData(unsupportedHello)).status
+        let statusAfterCompatibleHello = unavailableHost.receive(try jsonData(hello)).status
+        #expect(statusAfterCompatibleHello == unavailableStatus)
+    }
+
     @Test("an application request before hello receives a typed non-terminal failure")
     func requiresHandshakeFirst() throws {
         let fixture = try loadHandshakeFixture()

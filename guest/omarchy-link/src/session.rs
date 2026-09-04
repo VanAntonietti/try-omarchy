@@ -1,6 +1,7 @@
+use serde::Deserialize;
 use serde_json::{Value, json};
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub struct ProtocolVersion {
     pub major: u32,
     pub minor: u32,
@@ -12,15 +13,59 @@ pub struct ClientIdentity {
     pub version: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct NegotiatedSession {
-    pub protocol_version: ProtocolVersion,
-    pub capabilities: Vec<String>,
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(transparent)]
+pub struct CapabilityName(String);
+
+impl CapabilityName {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<String> for CapabilityName {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
+impl From<&str> for CapabilityName {
+    fn from(value: &str) -> Self {
+        Self(value.to_owned())
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NegotiatedSession {
+    pub protocol_version: ProtocolVersion,
+    pub capabilities: Vec<CapabilityName>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(transparent)]
+pub struct SessionFailureCode(String);
+
+impl SessionFailureCode {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<String> for SessionFailureCode {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
+impl From<&str> for SessionFailureCode {
+    fn from(value: &str) -> Self {
+        Self(value.to_owned())
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub struct SessionFailure {
-    pub code: String,
+    pub code: SessionFailureCode,
     pub message: String,
 }
 
@@ -72,61 +117,70 @@ impl GuestSession {
     }
 
     pub fn accept_handshake(&mut self, response: &Value) -> &GuestSessionState {
-        if let Some(failure) = response
-            .as_object()
-            .filter(|object| object.get("type").and_then(Value::as_str) == Some("error"))
-            .filter(|object| object.get("id").and_then(Value::as_str) == Some(&self.request_id))
-            .and_then(|object| object.get("error"))
-            .and_then(Value::as_object)
-            .and_then(|error| {
-                Some(SessionFailure {
-                    code: error.get("code")?.as_str()?.to_owned(),
-                    message: error.get("message")?.as_str()?.to_owned(),
-                })
-            })
-        {
-            self.state = GuestSessionState::LinkUnavailable(failure);
+        if self.state != GuestSessionState::AwaitingHandshake {
             return &self.state;
         }
 
-        let negotiated = response
-            .as_object()
-            .filter(|object| object.get("type").and_then(Value::as_str) == Some("response"))
-            .filter(|object| object.get("id").and_then(Value::as_str) == Some(&self.request_id))
-            .and_then(|object| object.get("result"))
-            .and_then(Value::as_object)
-            .and_then(|result| {
-                let protocol = result.get("protocol")?.as_object()?;
-                let major = u32::try_from(protocol.get("major")?.as_u64()?).ok()?;
-                let minor = u32::try_from(protocol.get("minor")?.as_u64()?).ok()?;
-                if major != self.supported_protocol.major || minor > self.supported_protocol.minor {
-                    return None;
-                }
-                let capabilities = result
-                    .get("capabilities")?
-                    .as_array()?
-                    .iter()
-                    .map(|capability| capability.as_str().map(str::to_owned))
-                    .collect::<Option<Vec<_>>>()?;
-                Some(NegotiatedSession {
-                    protocol_version: ProtocolVersion { major, minor },
-                    capabilities,
+        self.state = match serde_json::from_value::<HandshakeResponse>(response.clone()) {
+            Ok(HandshakeResponse::Response { id, result })
+                if id == self.request_id && result.is_compatible_with(&self.supported_protocol) =>
+            {
+                GuestSessionState::Available(NegotiatedSession {
+                    protocol_version: result.protocol,
+                    capabilities: result.capabilities,
                 })
-            });
-
-        self.state = negotiated.map_or_else(
-            || {
-                GuestSessionState::LinkUnavailable(SessionFailure {
-                    code: "session.invalid_response".to_owned(),
-                    message: "The Omarchy Link session response is malformed".to_owned(),
-                })
-            },
-            GuestSessionState::Available,
-        );
+            }
+            Ok(HandshakeResponse::Error { id, error })
+                if id == self.request_id
+                    && !error.code.as_str().is_empty()
+                    && !error.message.is_empty() =>
+            {
+                GuestSessionState::LinkUnavailable(error)
+            }
+            _ => GuestSessionState::LinkUnavailable(SessionFailure {
+                code: SessionFailureCode::from("session.invalid_response"),
+                message: "The Omarchy Link session response is malformed".to_owned(),
+            }),
+        };
         &self.state
     }
 
     pub fn state(&self) -> &GuestSessionState {
         &self.state
     }
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "type")]
+enum HandshakeResponse {
+    #[serde(rename = "response")]
+    Response { id: String, result: HandshakeResult },
+    #[serde(rename = "error")]
+    Error { id: String, error: SessionFailure },
+}
+
+#[derive(Deserialize)]
+struct HandshakeResult {
+    protocol: ProtocolVersion,
+    server: ServerIdentity,
+    capabilities: Vec<CapabilityName>,
+}
+
+impl HandshakeResult {
+    fn is_compatible_with(&self, supported: &ProtocolVersion) -> bool {
+        self.protocol.major == supported.major
+            && self.protocol.minor <= supported.minor
+            && !self.server.name.is_empty()
+            && !self.server.version.is_empty()
+            && self
+                .capabilities
+                .iter()
+                .all(|capability| !capability.as_str().is_empty())
+    }
+}
+
+#[derive(Deserialize)]
+struct ServerIdentity {
+    name: String,
+    version: String,
 }
