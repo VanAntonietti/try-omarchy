@@ -1,0 +1,234 @@
+{
+  "schemaVersion": 1,
+  "compatibleCases": [
+    {
+      "name": "all services remain off",
+      "serviceModes": {
+        "calendar": "off",
+        "messages": "off",
+        "notes": "off"
+      },
+      "hello": {
+        "type": "request",
+        "id": "hello-off",
+        "method": "session.hello",
+        "params": {
+          "client": {
+            "name": "omarchy-link",
+            "version": "0.0.1"
+          },
+          "protocol": {
+            "major": 1,
+            "minor": 0
+          }
+        }
+      },
+      "expectedResponse": {
+        "type": "response",
+        "id": "hello-off",
+        "result": {
+          "protocol": {
+            "major": 1,
+            "minor": 0
+          },
+          "server": {
+            "name": "try-omarchy-host",
+            "version": "0.0.1"
+          },
+          "capabilities": []
+        }
+      }
+    },
+    {
+      "name": "newer compatible minor and additive request fields",
+      "serviceModes": {
+        "calendar": "readWrite",
+        "messages": "read",
+        "notes": "off"
+      },
+      "hello": {
+        "type": "request",
+        "id": "hello-newer-minor",
+        "method": "session.hello",
+        "params": {
+          "client": {
+            "name": "omarchy-link-next",
+            "version": "0.0.2",
+            "futureBuild": "invented"
+          },
+          "protocol": {
+            "major": 1,
+            "minor": 7,
+            "futureProtocolFlag": true
+          },
+          "futureParameters": {
+            "ignored": true,
+            "requestedCapabilities": [
+              "host.shell",
+              "host.files.read"
+            ]
+          }
+        },
+        "futureEnvelopeField": "ignored"
+      },
+      "expectedResponse": {
+        "type": "response",
+        "id": "hello-newer-minor",
+        "result": {
+          "protocol": {
+            "major": 1,
+            "minor": 0
+          },
+          "server": {
+            "name": "try-omarchy-host",
+            "version": "0.0.1"
+          },
+          "capabilities": [
+            "calendar.calendars.list",
+            "calendar.events.create.propose",
+            "calendar.events.list",
+            "messages.conversations.list",
+            "messages.thread.list",
+            "messages.unread.get"
+          ]
+        }
+      }
+    },
+    {
+      "name": "read and write modes expose only named service operations",
+      "serviceModes": {
+        "calendar": "off",
+        "messages": "readWrite",
+        "notes": "readWrite"
+      },
+      "hello": {
+        "type": "request",
+        "id": "hello-write-modes",
+        "method": "session.hello",
+        "params": {
+          "client": {
+            "name": "omarchy-link",
+            "version": "0.0.1"
+          },
+          "protocol": {
+            "major": 1,
+            "minor": 0
+          }
+        }
+      },
+      "expectedResponse": {
+        "type": "response",
+        "id": "hello-write-modes",
+        "result": {
+          "protocol": {
+            "major": 1,
+            "minor": 0
+          },
+          "server": {
+            "name": "try-omarchy-host",
+            "version": "0.0.1"
+          },
+          "capabilities": [
+            "messages.conversations.list",
+            "messages.send.propose",
+            "messages.thread.list",
+            "messages.unread.get",
+            "notes.append.propose",
+            "notes.create.propose",
+            "notes.folders.list",
+            "notes.get",
+            "notes.recent.list",
+            "notes.search"
+          ]
+        }
+      }
+    }
+  ],
+  "unavailableCases": [
+    {
+      "name": "unsupported protocol major",
+      "serviceModes": {
+        "calendar": "readWrite",
+        "messages": "readWrite",
+        "notes": "readWrite"
+      },
+      "hello": {
+        "type": "request",
+        "id": "hello-major-two",
+        "method": "session.hello",
+        "params": {
+          "client": {
+            "name": "omarchy-link",
+            "version": "0.0.1"
+          },
+          "protocol": {
+            "major": 2,
+            "minor": 0
+          }
+        }
+      },
+      "expectedResponse": {
+        "type": "error",
+        "id": "hello-major-two",
+        "error": {
+          "code": "session.unsupported_protocol",
+          "message": "Omarchy Link protocol major 2 is unsupported"
+        }
+      }
+    },
+    {
+      "name": "malformed hello",
+      "serviceModes": {
+        "calendar": "read",
+        "messages": "off",
+        "notes": "off"
+      },
+      "hello": {
+        "type": "request",
+        "id": "hello-malformed",
+        "method": "session.hello",
+        "params": {
+          "client": {
+            "name": "omarchy-link"
+          },
+          "protocol": {
+            "major": 1,
+            "minor": 0
+          }
+        }
+      },
+      "expectedResponse": {
+        "type": "error",
+        "id": "hello-malformed",
+        "error": {
+          "code": "session.invalid_handshake",
+          "message": "The Omarchy Link session handshake is malformed"
+        }
+      }
+    }
+  ],
+  "requestBeforeHandshake": {
+    "serviceModes": {
+      "calendar": "read",
+      "messages": "off",
+      "notes": "off"
+    },
+    "request": {
+      "type": "request",
+      "id": "agenda-too-early",
+      "method": "calendar.events.list",
+      "params": {
+        "from": "2026-09-07T00:00:00-03:00",
+        "through": "2026-09-14T00:00:00-03:00"
+      }
+    },
+    "expectedResponse": {
+      "type": "error",
+      "id": "agenda-too-early",
+      "error": {
+        "code": "session.handshake_required",
+        "message": "session.hello must be the first accepted request"
+      }
+    }
+  }
+}
