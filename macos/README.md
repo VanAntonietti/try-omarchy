@@ -62,6 +62,60 @@ ephemeral VM. This keeps an older root filesystem on its matching kernel-module
 ABI and lets an existing VM launch without first materializing the new factory
 disk.
 
+### Omarchy Link Workspace identity
+
+New persistent Workspaces also receive a random, lowercase UUIDv4, distinct
+from the factory digest and storage path. It is the key for per-Workspace
+Service Modes, not a secret or an Apple permission grant. Factory Reset creates
+a different identity even with the same factory and folder; old identity-keyed
+choices must not be carried forward. Service Mode persistence/UI and the live
+Link channel are separate follow-up work (#7 and #9).
+
+The locked storage transaction writes one host-owned extended attribute,
+`dev.tryomarchy.workspace-identity`, on the mode-0700 Workspace directory. Its
+exact record is `v1:<uuid>:<volume-uuid>:<directory-inode>:<disk-inode>`.
+The persistent volume UUID and both file identities are checked on every
+selection; mount-time device numbers are deliberately not persisted, so
+rebooting or reconnecting the same drive does not invalidate identity. The
+record is written only in a new disk's staging directory, flushed with that
+disk, then published by the existing atomic directory rename. Reset detaches the old directory and
+its identity together. Interrupted staging/discarded directories are reclaimed,
+never adopted as another Workspace's identity.
+
+The signed native helper's local-only `--workspace-binding DIRECTORY` operation
+supplies the stable binding. Its `--sync-storage PATH` operation performs checked
+`fsync` and `F_FULLFSYNC` barriers on files and directories; `/bin/sync` alone is
+not a durability guarantee. Storage flushes staged file contents and the
+identity-bearing directory before publication, and the parent directory after
+publication or reset detachment. A storage durability error aborts that storage
+transaction rather than claiming success. Neither helper operation is exposed
+through Link. To run a storage test file independently, first build the helper
+with `swift build --package-path macos --disable-sandbox`; tests select that
+local debug executable, while the signed launcher supplies its bundled helper.
+
+An app update or same-volume folder rename retains identity. Copying/cloning
+host state, replacing its disk or directory, moving it across volumes, losing
+extended attributes, or substituting another Workspace's record disables Link
+without blocking the VM. Missing or malformed state is never auto-repaired;
+Factory Reset is the supported way to obtain a new identity. This guards
+against accidental state substitution, not a compromised hosting Mac user who
+can rewrite all host-owned state.
+
+Storage selection exposes `QEMU_LINK_WORKSPACE_IDENTITY` and the corresponding
+`tryomarchy.workspace_id=<uuid>` kernel token only after host validation. The
+token presents identity without modifying guest disk contents. A Workspace-bound
+host handshake requires the broker to echo it as `params.workspaceIdentity`
+before advertising Capabilities. A mismatch makes that Link Session unavailable;
+only explicit invented-data fixtures bypass this check. There is still no live
+broker/channel consuming the token or accessing Mac Services.
+
+**Existing persistent disks are not retrofitted:** no identity or guest
+components are injected, even if they came from the current factory. They boot
+without the token and remain usable without Link. Ephemeral launches likewise
+receive no persistent identity or inherited Service Mode key in this slice.
+
+### Older boot-kit migration
+
 Schema-2 disks created before boot kits use a one-time preserving migration.
 The first launcher pass reports that consent is required and exits before QEMU
 starts. The start menu then explains that the disk and data stay intact, the

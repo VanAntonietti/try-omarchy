@@ -65,6 +65,7 @@ test:
 	@$(ROOT)/macos/Tests/run-qemu-ssh-contract.test.sh
 	@$(ROOT)/macos/Tests/qemu-power-actions.test.sh
 	@$(ROOT)/macos/Tests/qemu-persistent-storage.test.sh
+	@$(ROOT)/macos/Tests/omarchy-link-workspace.test.sh
 
 guest:
 	@OMARCHY_FORCE_BUILD="$(FORCE)" "$(BUILD_CACHE)" \

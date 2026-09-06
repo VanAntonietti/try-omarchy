@@ -21,6 +21,12 @@ QEMU_PERSISTENT_STORAGE_MISSING_STATUS=79
 # Room the guest needs beyond whatever the workspace itself costs to create.
 QEMU_PERSISTENT_STORAGE_HEADROOM_BYTES=1073741824
 
+# Link identity is not the factory bundle digest. It belongs to one Workspace
+# generation and must never be repaired or retrofitted onto an existing disk.
+QEMU_LINK_WORKSPACE_ATTRIBUTE='dev.tryomarchy.workspace-identity'
+QEMU_LINK_WORKSPACE_IDENTITY=''
+QEMU_LINK_WORKSPACE_KERNEL_ARGUMENT=''
+
 QEMU_SELECTED_DISK=''
 QEMU_SELECTED_STORAGE_MODE=''
 QEMU_PERSISTENT_STORAGE_DIRECTORY=''
@@ -584,7 +590,11 @@ _qps_validate_store_directory() {
 }
 
 _qps_fsync() {
-  /bin/sync
+  [[ -x ${QEMU_PERSISTENT_STORAGE_HELPER:-} ]] || {
+    _qps_fail 'the native storage durability helper is unavailable'
+    return 1
+  }
+  "$QEMU_PERSISTENT_STORAGE_HELPER" --sync-storage "$1"
 }
 
 _qps_clone_disk() {
@@ -639,7 +649,7 @@ _qps_validate_kernel_command_line() {
       console=tty0) ((qps_console_zero_count += 1)) ;;
       console=hvc0) ((qps_console_hvc_count += 1)) ;;
       omarchy.qemu_virgl=*|omarchy.shared_folder_name=*|tryomarchy.ssh_access=*|\
-      tryomarchy.export_boot=*) return 1 ;;
+      tryomarchy.export_boot=*|tryomarchy.workspace_id=*) return 1 ;;
     esac
   done
   (( qps_root_count == 1 && qps_rw_count == 1 && qps_rootwait_count == 1 && \
@@ -715,6 +725,7 @@ _qps_copy_private_file() {
     _qps_fail "$qps_label copy aliases its source inode"
     return 1
   }
+  _qps_fsync "$qps_destination"
 }
 
 _qps_write_boot_metadata() {
@@ -1000,6 +1011,8 @@ _qps_stage_boot_kit_locked() {
     /bin/rm -rf "$qps_staging"
     return 1
   fi
+  _qps_fsync "$qps_staging/command-line" || return 1
+  _qps_fsync "$qps_staging/metadata.json" || return 1
   _qps_fsync "$qps_staging" || return 1
   [[ ! -e $qps_final && ! -L $qps_final ]] || return 1
   /bin/mv "$qps_staging" "$qps_final" || return 1
@@ -1295,6 +1308,56 @@ _qps_reap_interrupted_work() {
   done
 }
 
+_qps_is_workspace_identity() {
+  [[ ${1:-} =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]
+}
+
+_qps_workspace_identity_record() {
+  local qps_directory=$1
+  local qps_workspace_identity=$2
+  local qps_binding=''
+
+  [[ -x ${QEMU_PERSISTENT_STORAGE_HELPER:-} ]] || return 1
+  qps_binding=$("$QEMU_PERSISTENT_STORAGE_HELPER" --workspace-binding "$qps_directory") || return 1
+  printf 'v1:%s:%s' "$qps_workspace_identity" "$qps_binding"
+}
+
+_qps_initialize_workspace_identity() {
+  local qps_directory=$1
+  local qps_workspace_identity=''
+  local qps_record=''
+
+  qps_workspace_identity=$(/usr/bin/uuidgen | tr '[:upper:]' '[:lower:]') || return 1
+  _qps_is_workspace_identity "$qps_workspace_identity" || return 1
+  qps_record=$(_qps_workspace_identity_record "$qps_directory" "$qps_workspace_identity") || return 1
+  # One atomic host-owned attribute, flushed with the staged disk before its
+  # directory is renamed into place. The directory and disk file identities
+  # survive rename, but not copying/cloning or substituting either object.
+  /usr/bin/xattr -w "$QEMU_LINK_WORKSPACE_ATTRIBUTE" "$qps_record" "$qps_directory"
+}
+
+_qps_select_workspace_identity() {
+  local qps_directory=$1
+  local qps_record=''
+  local qps_workspace_identity=''
+  local qps_expected=''
+
+  QEMU_LINK_WORKSPACE_IDENTITY=''
+  QEMU_LINK_WORKSPACE_KERNEL_ARGUMENT=''
+  qps_record=$(/usr/bin/xattr -p "$QEMU_LINK_WORKSPACE_ATTRIBUTE" "$qps_directory" 2>/dev/null) || return 1
+  qps_workspace_identity=${qps_record#v1:}
+  qps_workspace_identity=${qps_workspace_identity%%:*}
+  _qps_is_workspace_identity "$qps_workspace_identity" || return 1
+  qps_expected=$(_qps_workspace_identity_record "$qps_directory" "$qps_workspace_identity") || return 1
+  [[ $qps_record == "$qps_expected" ]] || return 1
+  # Shell strings discard NULs and command substitution strips newlines. Check
+  # the exact attribute bytes too, so either kind of corruption fails closed.
+  [[ $(/usr/bin/xattr -px "$QEMU_LINK_WORKSPACE_ATTRIBUTE" "$qps_directory" 2>/dev/null | tr -d '[:space:]' | tr 'A-F' 'a-f') == \
+     $(printf '%s' "$qps_expected" | /usr/bin/od -An -v -tx1 | tr -d '[:space:]') ]] || return 1
+  QEMU_LINK_WORKSPACE_IDENTITY=$qps_workspace_identity
+  QEMU_LINK_WORKSPACE_KERNEL_ARGUMENT=" tryomarchy.workspace_id=$qps_workspace_identity"
+}
+
 _qps_initialize_persistent_disk() {
   local qps_identity=$1
   local qps_storage_key=$2
@@ -1336,6 +1399,11 @@ _qps_initialize_persistent_disk() {
   _qps_validate_store_directory \
     "$qps_staging" "$qps_identity" "$qps_source_sha" "$qps_source_bytes" \
     "$qps_working_bytes" || return 1
+  if ! _qps_initialize_workspace_identity "$qps_staging"; then
+    _qps_error 'Omarchy Link unavailable: could not create Workspace identity'
+  fi
+  _qps_fsync "$qps_staging/rootfs.ext4" || return 1
+  _qps_fsync "$qps_staging/metadata.json" || return 1
   _qps_fsync "$qps_staging" || {
     _qps_fail 'cannot flush persistent-disk staging directory'
     return 1
@@ -1703,6 +1771,9 @@ _qps_publish_recorded_selection() {
   QEMU_PERSISTENT_STORAGE_DIRECTORY=$qps_final
   QEMU_PERSISTENT_STORAGE_IDENTITY=$QPS_METADATA_IDENTITY
   QEMU_PERSISTENT_STORAGE_WORKING_BYTES=$QPS_RECORDED_EXISTING_BYTES
+  if ! _qps_select_workspace_identity "$qps_final"; then
+    _qps_error 'Omarchy Link unavailable: Workspace identity is missing or invalid; VM remains usable'
+  fi
 
   if [[ ! -e $QEMU_PERSISTENT_STORAGE_BOOT_ROOT/$QPS_METADATA_IDENTITY && \
         ! -L $QEMU_PERSISTENT_STORAGE_BOOT_ROOT/$QPS_METADATA_IDENTITY && \
@@ -1851,6 +1922,8 @@ _qps_select_ephemeral_disk() {
 # image. Returns QEMU_PERSISTENT_STORAGE_MISSING_STATUS when no VM exists, so
 # the launcher can materialize the factory only for a genuinely new machine.
 qemu_persistent_storage_select_existing() {
+  QEMU_LINK_WORKSPACE_IDENTITY=''
+  QEMU_LINK_WORKSPACE_KERNEL_ARGUMENT=''
   local qps_identity=${1:-}
   local qps_kernel=${2:-}
   local qps_initramfs=${3:-}
@@ -1938,10 +2011,17 @@ qemu_persistent_storage_select_existing() {
 #   9. validated bundled initramfs (required with argument 8)
 #  10. validated base kernel command line (required with argument 8)
 #
+# QEMU_PERSISTENT_STORAGE_HELPER must name the signed native helper (or the
+# locally built helper for storage tests), for durable writes and volume UUIDs.
 # On success, QEMU_SELECTED_DISK and QEMU_SELECTED_STORAGE_MODE are populated.
+# QEMU_LINK_WORKSPACE_IDENTITY is a validated Service Mode key, or empty when
+# Link is unavailable. QEMU_LINK_WORKSPACE_KERNEL_ARGUMENT presents that key to
+# the guest without writing its disk. Neither output is a factory identity.
 # Persistent/reset mode also holds FD 9 until the caller exits or explicitly
 # calls qemu_persistent_storage_release_lock.
 qemu_persistent_storage_select() {
+  QEMU_LINK_WORKSPACE_IDENTITY=''
+  QEMU_LINK_WORKSPACE_KERNEL_ARGUMENT=''
   local qps_mode=${1:-}
   local qps_identity=${2:-}
   local qps_source=${3:-}

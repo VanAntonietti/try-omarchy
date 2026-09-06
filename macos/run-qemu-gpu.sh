@@ -671,6 +671,8 @@ if any(argument.startswith("omarchy.shared_folder_name=") for argument in argume
     fail("kernel command line already contains a shared folder name")
 if any(argument.startswith("tryomarchy.ssh_access=") for argument in arguments):
     fail("kernel command line contains a launcher-owned SSH activation argument")
+if any(argument.startswith("tryomarchy.workspace_id=") for argument in arguments):
+    fail("kernel command line contains a launcher-owned Workspace identity")
 
 records = manifest.get("artifacts")
 if not isinstance(records, list) or len(records) != len(expected_artifacts):
@@ -777,6 +779,9 @@ case " $kernel_command_line " in
   *' tryomarchy.ssh_access='*)
     fail "validated kernel command line contains a launcher-owned SSH activation argument"
     ;;
+  *' tryomarchy.workspace_id='*)
+    fail "validated kernel command line contains a launcher-owned Workspace identity"
+    ;;
 esac
 if [[ ${OMARCHY_QEMU_GPU_INSPECT_ONLY:-0} == 1 ]]; then
   printf '%s\n' "$bundle_validation"
@@ -793,6 +798,7 @@ fi
 # These libraries are sealed resources in normal app launches. The complete
 # app bundle was verified above before either file can execute. Inspect-only is
 # a build-time path and exits without sourcing any shell library.
+export QEMU_PERSISTENT_STORAGE_HELPER="$native_bridge"
 # shellcheck source=qemu-persistent-storage.sh
 source "$storage_library"
 # shellcheck source=qemu-port-forwarding.sh
@@ -1285,7 +1291,7 @@ qemu_args=(
   -qmp "unix:$qmp_socket,server=on,wait=off"
   -kernel "$launch_kernel"
   -initrd "$launch_initramfs"
-  -append "$launch_kernel_command_line omarchy.qemu_virgl=1$shared_folder_kernel_argument$ssh_kernel_argument"
+  -append "$launch_kernel_command_line omarchy.qemu_virgl=1$shared_folder_kernel_argument$ssh_kernel_argument${QEMU_LINK_WORKSPACE_KERNEL_ARGUMENT:-}"
   -drive "if=none,id=omarchy-root,file=$working_disk,format=raw,media=disk,cache=writeback"
   -device 'virtio-blk-pci,drive=omarchy-root,serial=omarchy-root'
   -device "$gpu_device"

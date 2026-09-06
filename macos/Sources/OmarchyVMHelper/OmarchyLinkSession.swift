@@ -1,5 +1,20 @@
 import Foundation
 
+/// Canonical random UUID used as the Service Mode key, never a factory digest
+/// or storage path. Syntax alone does not validate host state: the launcher
+/// must first verify the Workspace's disk binding before supplying this value.
+struct OmarchyLinkWorkspaceIdentity: RawRepresentable, Equatable, Hashable {
+    let rawValue: String
+
+    init?(rawValue: String) {
+        guard rawValue.range(
+            of: "\\A[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\\z",
+            options: .regularExpression
+        ) != nil else { return nil }
+        self.rawValue = rawValue
+    }
+}
+
 enum OmarchyLinkServiceMode: String, Equatable {
     case off
     case read
@@ -44,6 +59,7 @@ enum OmarchyLinkSessionFailureCode: String, Equatable {
     case handshakeAlreadyComplete = "session.handshake_already_complete"
     case handshakeRequired = "session.handshake_required"
     case invalidHandshake = "session.invalid_handshake"
+    case invalidWorkspaceIdentity = "session.invalid_workspace_identity"
     case unsupportedProtocol = "session.unsupported_protocol"
 }
 
@@ -105,11 +121,25 @@ struct OmarchyLinkHostReply: Equatable {
 }
 
 struct OmarchyLinkHostSession {
+    private enum IdentityPolicy {
+        case developmentFixture
+        case workspace(OmarchyLinkWorkspaceIdentity?)
+    }
+
     private let serviceModes: OmarchyLinkServiceModes
+    private let identityPolicy: IdentityPolicy
     private(set) var status = OmarchyLinkHostSessionStatus.awaitingHandshake
 
-    init(serviceModes: OmarchyLinkServiceModes) {
+    /// nil means the host could not validate Workspace state, not an opt-out.
+    init(serviceModes: OmarchyLinkServiceModes, workspaceIdentity: OmarchyLinkWorkspaceIdentity?) {
         self.serviceModes = serviceModes
+        identityPolicy = .workspace(workspaceIdentity)
+    }
+
+    /// Invented-data fixtures predate Workspace identity and have no VM access.
+    init(developmentServiceModes: OmarchyLinkServiceModes) {
+        serviceModes = developmentServiceModes
+        identityPolicy = .developmentFixture
     }
 
     mutating func receive(_ payload: Data) -> OmarchyLinkHostReply {
@@ -136,6 +166,17 @@ struct OmarchyLinkHostSession {
                 status: status,
                 message: .error(id: envelope.id, failure: failure)
             )
+        }
+        if case .workspace(let expectedIdentity) = identityPolicy {
+            guard let expectedIdentity,
+                  let hello = try? JSONDecoder().decode(WorkspaceHelloRequest.self, from: payload),
+                  hello.params.workspaceIdentity == expectedIdentity.rawValue else {
+                return makeUnavailable(
+                    id: envelope.id,
+                    code: .invalidWorkspaceIdentity,
+                    message: "Omarchy Link Workspace identity is missing or invalid"
+                )
+            }
         }
         guard let hello = try? JSONDecoder().decode(HelloRequest.self, from: payload),
               !hello.params.client.name.isEmpty,
@@ -243,6 +284,14 @@ private struct RequestEnvelope: Decodable {
     let type: String
     let id: String
     let method: String
+}
+
+private struct WorkspaceHelloRequest: Decodable {
+    let params: Parameters
+
+    struct Parameters: Decodable {
+        let workspaceIdentity: String
+    }
 }
 
 private struct HelloRequest: Decodable {

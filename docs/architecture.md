@@ -58,6 +58,15 @@ proposal or write host data. An EventKit adapter compiles behind the same Swift
 boundary but no production route constructs it, requests Calendar permission,
 or reads personal data.
 
+New persistent Workspaces now have a separate random, host-validated Link
+identity, atomically published with their disk state and replaced by Factory
+Reset. The launcher presents it as a non-secret kernel token; existing pre-Link
+disks are never retrofitted. Invalid identity state disables only Link, and the
+Workspace-bound host handshake refuses missing or mismatched identities before
+advertising Capabilities. Service Mode persistence and the actual broker/channel
+remain follow-up work. See [Workspace identity](../macos/README.md#omarchy-link-workspace-identity)
+for the host-state binding, crash recovery, and copy/relocation policy.
+
 A separate virtio-serial port (`dev.tryomarchy.camera`) carries fixed-size
 1280×720 NV12 frames from an AVFoundation bridge in the signed Mac helper. The
 guest feeds those frames into an exclusive-capabilities `v4l2loopback` device,

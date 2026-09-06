@@ -5,7 +5,7 @@ import Foundation
 private var terminationSignalSources: [DispatchSourceSignal] = []
 
 private func usage() -> Never {
-    fputs("Usage: omarchy-vm-helper --run-qemu [--ephemeral | --reset-storage | --reset-storage-only] [GUEST_DIR] | --bridge-command-super QEMU_PID QMP_SOCKET | --bridge-native-audio QEMU_PID SOCKET ROUTE_DIRECTORY | --bridge-native-camera QEMU_PID SOCKET | --bridge-native-clipboard QEMU_PID SOCKET\n", stderr)
+    fputs("Usage: omarchy-vm-helper --run-qemu [--ephemeral | --reset-storage | --reset-storage-only] [GUEST_DIR] | --workspace-binding DIRECTORY | --sync-storage PATH | --bridge-command-super QEMU_PID QMP_SOCKET | --bridge-native-audio QEMU_PID SOCKET ROUTE_DIRECTORY | --bridge-native-camera QEMU_PID SOCKET | --bridge-native-clipboard QEMU_PID SOCKET\n", stderr)
     exit(64)
 }
 
@@ -19,6 +19,18 @@ private func effectiveArguments() -> [String] {
 
 let arguments = effectiveArguments()
 do {
+    if arguments.first == "--sync-storage" {
+        guard arguments.count == 2 else { usage() }
+        try WorkspaceStorage.synchronize(path: arguments[1])
+        exit(0)
+    }
+
+    if arguments.first == "--workspace-binding" {
+        guard arguments.count == 2 else { usage() }
+        print(try WorkspaceStorage.binding(directory: arguments[1]))
+        exit(0)
+    }
+
     if arguments.first == "--bridge-native-audio" {
         guard arguments.count == 4,
               let processIdentifier = Int32(arguments[1]),

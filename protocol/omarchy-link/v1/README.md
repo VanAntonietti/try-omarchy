@@ -14,9 +14,21 @@ The initial envelope vocabulary is:
 
 `session.hello` must be the first accepted request. Its parameters name the guest client and the major/minor protocol version it supports. Peers with major version 1 negotiate the lower supported minor version and ignore unknown additive fields; another major or a malformed hello makes Link unavailable without failing the VM.
 
+Workspace-bound sessions additionally require `params.workspaceIdentity`: the
+exact lowercase UUIDv4 presented by the launcher as `tryomarchy.workspace_id`.
+The host compares it with the identity validated against its selected Workspace
+state, never a guest-selected state path or factory digest. Missing, malformed,
+or mismatched values, including a valid identity from before Factory Reset,
+make Link terminally unavailable with `session.invalid_workspace_identity`
+before any Capabilities are advertised. Missing/unvalidated host identity also
+fails closed. The unchanged invented-data fixtures use an explicitly named
+development initializer; they do not establish a production identity bypass.
+Older pre-Link persistent disks are not modified or given an identity. The live
+broker/channel that will carry this handshake remains follow-up work.
+
 The host derives advertised Capabilities from its launch-fixed Service Modes. Off advertises none, Read advertises only named queries, and Read & Write adds only named Mutation Proposal operations. Enabling reads will expose private Mac Service data to processes in the trusted Owner session and must be disclosed wherever real access is offered. Client-supplied fields cannot add Capabilities. The current fake policy is captured in `handshake-fixtures.json`; it exposes only Calendar, Messages, and Notes operations and no shell, SQL, file, script, or generic dispatch surface.
 
-`session.handshake_required`, `session.handshake_already_complete`, `session.invalid_handshake`, and `session.unsupported_protocol` are typed handshake failures. The Swift host and Rust guest consume the shared fixtures. The daemon, VM channel, and real Mac Service adapters remain unimplemented.
+`session.handshake_required`, `session.handshake_already_complete`, `session.invalid_handshake`, `session.invalid_workspace_identity`, and `session.unsupported_protocol` are typed handshake failures. The Swift host and Rust guest consume the shared fixtures. The daemon, VM channel, and real Mac Service adapters remain unimplemented.
 
 ## Fake request lifecycle
 

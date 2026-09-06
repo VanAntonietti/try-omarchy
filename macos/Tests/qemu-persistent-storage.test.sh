@@ -6,6 +6,7 @@ test_dir=$(cd "$(dirname "$0")" && pwd -P)
 native_dir=$(cd "$test_dir/.." && pwd -P)
 # shellcheck source=../qemu-persistent-storage.sh
 source "$native_dir/qemu-persistent-storage.sh"
+export QEMU_PERSISTENT_STORAGE_HELPER="$native_dir/.build/debug/omarchy-vm-helper"
 
 grep -Fq '/bin/rm -rf -x "$qps_discarded"' \
   "$native_dir/qemu-persistent-storage.sh" || {

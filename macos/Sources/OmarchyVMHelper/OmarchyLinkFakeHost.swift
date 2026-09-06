@@ -38,7 +38,7 @@ struct OmarchyLinkFakeHost {
         serviceModes: OmarchyLinkServiceModes,
         calendarProvider: any OmarchyLinkCalendarProviding = InventedOmarchyLinkCalendarAdapter()
     ) {
-        session = OmarchyLinkHostSession(serviceModes: serviceModes)
+        session = OmarchyLinkHostSession(developmentServiceModes: serviceModes)
         self.calendarProvider = calendarProvider
     }
 
