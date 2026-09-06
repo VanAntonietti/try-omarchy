@@ -94,6 +94,8 @@ for native_command in \
 done
 mkdir -p "$root/etc/systemd/user/default.target.wants" \
   "$root/etc/systemd/user/graphical-session.target.wants"
+ln -sfn /usr/lib/systemd/user/omarchy-link.service \
+  "$root/etc/systemd/user/default.target.wants/omarchy-link.service"
 ln -sfn /usr/lib/systemd/user/omarchy-native-audio-bridge.service \
   "$root/etc/systemd/user/default.target.wants/omarchy-native-audio-bridge.service"
 ln -sfn /usr/lib/systemd/user/omarchy-native-camera-bridge.service \

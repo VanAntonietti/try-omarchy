@@ -1,3 +1,5 @@
+mod local;
+
 use omarchy_link::{
     AgendaRange, CalendarCreateRequest, DevelopmentAgendaBroker, DevelopmentMutationBroker,
     InventedCalendarHostAdapter, ReviewDecision, ReviewInterlock, ReviewPresentation,
@@ -19,21 +21,48 @@ fn main() -> ExitCode {
     let mut arguments = env::args().skip(1);
     match arguments.next().as_deref() {
         Some("status") if arguments.next().is_none() => {
-            println!(
-                "{}",
-                json!({
-                    "available": false,
-                    "protocol": { "major": 1, "minor": 0 },
-                    "reason": "fake-data protocol peer only"
-                })
-            );
+            println!("{}", local::status());
             ExitCode::SUCCESS
         }
         Some("demo-agenda") => demo_agenda(arguments.collect()),
         Some("demo-create") => demo_create(arguments.collect()),
-        Some("daemon") | Some("call") => {
-            eprintln!("omarchy-link: command is not implemented in the protocol scaffold");
-            ExitCode::from(69)
+        Some("daemon") => {
+            let args: Vec<_> = arguments.collect();
+            let fake = args == ["--development-fake"];
+            if !args.is_empty() && !fake {
+                usage();
+                return ExitCode::from(64);
+            }
+            match local::daemon(fake) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(_) => {
+                    eprintln!("omarchy-link: broker unavailable");
+                    ExitCode::from(69)
+                }
+            }
+        }
+        Some("call") if arguments.next().is_none() => {
+            use std::io::Read;
+            let mut input = Vec::new();
+            if io::stdin().take(65537).read_to_end(&mut input).is_err() || input.len() > 65536 {
+                return ExitCode::from(64);
+            }
+            let Ok(request) = serde_json::from_slice(&input) else {
+                return ExitCode::from(64);
+            };
+            match local::client(request) {
+                Ok(response) => {
+                    println!("{response}");
+                    ExitCode::SUCCESS
+                }
+                Err(_) => {
+                    println!(
+                        "{}",
+                        json!({"error":{"code":"service.unavailable","message":"host Link unavailable"}})
+                    );
+                    ExitCode::from(69)
+                }
+            }
         }
         _ => {
             usage();
