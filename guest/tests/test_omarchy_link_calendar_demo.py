@@ -40,6 +40,7 @@ class OmarchyLinkCalendarDemoTests(unittest.TestCase):
         self.assertIn('"--start", createStart.text', qml)
         self.assertIn('"--end", createEnd.text', qml)
         self.assertIn('"--calendar"', qml)
+        self.assertIn('"review.ui_unavailable"', qml)
         self.assertNotIn('"--approve"', qml)
         self.assertNotIn("calendar.events.create.perform", qml)
         self.assertNotIn("proposal.approve", qml)

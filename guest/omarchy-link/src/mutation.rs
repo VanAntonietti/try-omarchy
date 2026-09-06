@@ -1,6 +1,6 @@
 use crate::{
     CalendarHostAdapter, CalendarMutationProposal, GuestPeer, PeerMessage, ProposalCalendar,
-    encode_json,
+    encode_json, peer::timestamp_seconds,
 };
 use serde::Serialize;
 use serde_json::json;
@@ -298,49 +298,4 @@ impl ReviewInterlock {
             performed: false,
         }
     }
-}
-
-fn timestamp_seconds(value: &str) -> Option<u64> {
-    let bytes = value.as_bytes();
-    if bytes.len() != 20
-        || bytes[4] != b'-'
-        || bytes[7] != b'-'
-        || bytes[10] != b'T'
-        || bytes[13] != b':'
-        || bytes[16] != b':'
-        || bytes[19] != b'Z'
-        || !bytes.iter().enumerate().all(|(index, byte)| {
-            matches!(index, 4 | 7 | 10 | 13 | 16 | 19) || byte.is_ascii_digit()
-        })
-    {
-        return None;
-    }
-    let year = value[0..4].parse::<u64>().ok()?;
-    let month = value[5..7].parse::<u8>().ok()?;
-    let day = value[8..10].parse::<u64>().ok()?;
-    let hour = value[11..13].parse::<u64>().ok()?;
-    let minute = value[14..16].parse::<u64>().ok()?;
-    let second = value[17..19].parse::<u64>().ok()?;
-    if year == 0 || hour >= 24 || minute >= 60 || second >= 60 {
-        return None;
-    }
-    let leap = year.is_multiple_of(400) || (year.is_multiple_of(4) && !year.is_multiple_of(100));
-    let days_in_month = match month {
-        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-        4 | 6 | 9 | 11 => 30,
-        2 if leap => 29,
-        2 => 28,
-        _ => return None,
-    };
-    if day == 0 || day > days_in_month {
-        return None;
-    }
-    let days_before_month = [0_u64, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334];
-    let previous_year = year - 1;
-    let days_before_year =
-        365 * previous_year + previous_year / 4 - previous_year / 100 + previous_year / 400;
-    let leap_day = u64::from(leap && month > 2);
-    let elapsed_days =
-        days_before_year + days_before_month[usize::from(month - 1)] + leap_day + day - 1;
-    Some(elapsed_days * 86_400 + hour * 3_600 + minute * 60 + second)
 }

@@ -481,7 +481,7 @@ fn valid_timestamp(value: &str) -> bool {
     timestamp_seconds(value).is_some()
 }
 
-fn timestamp_seconds(value: &str) -> Option<u64> {
+pub(crate) fn timestamp_seconds(value: &str) -> Option<u64> {
     let bytes = value.as_bytes();
     if bytes.len() != 20
         || bytes[4] != b'-'

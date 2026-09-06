@@ -143,7 +143,11 @@ ShellRoot {
     id: reviewProcess
     onExited: function(exitCode) {
       if (exitCode === 126 || exitCode === 127)
-        root.failure = "The visible Calendar review UI could not be opened."
+        root.failure = JSON.stringify({
+          status: "blocked",
+          code: "review.ui_unavailable",
+          performed: false
+        })
     }
   }
 
