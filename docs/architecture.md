@@ -50,9 +50,13 @@ product UI. New/reset factories carry an inert invented-data broker and
 a standalone Quickshell Calendar agenda proof, both gated by
 `OMARCHY_LINK_DEVELOPMENT=1`; they have no service, desktop entry, menu item, or
 automatic launch path. The Swift fake host and Rust surface obtain Calendar
-records through replaceable adapters. An EventKit adapter compiles behind the
-same Swift boundary but no production route constructs it, requests Calendar
-permission, or reads personal data.
+records through replaceable adapters. The surface can also submit an invented
+create request for host canonicalization and launch a one-shot terminal Review
+Interlock. That interlock fails closed when the session is locked, its Wayland
+review UI is missing, or the caller is headless, and no command can execute the
+proposal or write host data. An EventKit adapter compiles behind the same Swift
+boundary but no production route constructs it, requests Calendar permission,
+or reads personal data.
 
 A separate virtio-serial port (`dev.tryomarchy.camera`) carries fixed-size
 1280×720 NV12 frames from an AVFoundation bridge in the signed Mac helper. The

@@ -31,6 +31,19 @@ class OmarchyLinkCalendarDemoTests(unittest.TestCase):
         self.assertNotIn("Invented Focus", qml)
         self.assertNotIn("Invented Personal", qml)
 
+    def test_surface_opens_the_canonical_create_request_in_a_visible_review_ui(self) -> None:
+        qml = SURFACE.read_text(encoding="utf-8")
+
+        self.assertIn('"foot"', qml)
+        self.assertIn('"demo-create"', qml)
+        self.assertIn('"--title", createTitle.text', qml)
+        self.assertIn('"--start", createStart.text', qml)
+        self.assertIn('"--end", createEnd.text', qml)
+        self.assertIn('"--calendar"', qml)
+        self.assertNotIn('"--approve"', qml)
+        self.assertNotIn("calendar.events.create.perform", qml)
+        self.assertNotIn("proposal.approve", qml)
+
     def test_launcher_requires_the_explicit_development_flag(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             temporary_path = Path(temporary)

@@ -17,6 +17,14 @@ struct OmarchyLinkFakeHost {
     private enum PendingWork {
         case calendars
         case events(OmarchyLinkCalendarQuery)
+        case calendarCreateProposal(CalendarCreateRequest)
+    }
+
+    private struct CalendarCreateRequest {
+        let title: String
+        let startsAt: String
+        let endsAt: String
+        let calendarID: String
     }
 
     private var session: OmarchyLinkHostSession
@@ -89,6 +97,9 @@ struct OmarchyLinkFakeHost {
         case OmarchyLinkCapability.calendarEventList.rawValue
             where negotiated.capabilities.contains(.calendarEventList):
             work = .events(try Self.calendarQuery(parameters))
+        case OmarchyLinkCapability.calendarEventCreateProposal.rawValue
+            where negotiated.capabilities.contains(.calendarEventCreateProposal):
+            work = .calendarCreateProposal(try Self.calendarCreateRequest(parameters))
         default:
             return try failure(
                 id,
@@ -146,6 +157,8 @@ struct OmarchyLinkFakeHost {
                 result = ["calendars": try calendarObjects()]
             case .events(let query):
                 result = ["events": try eventObjects(matching: query)]
+            case .calendarCreateProposal(let request):
+                result = ["proposal": try calendarCreateProposal(request, requestID: id)]
             }
             return try OmarchyLinkFrameCodec.encodeJSONObject([
                 "type": "response", "id": id, "result": result,
@@ -199,6 +212,51 @@ struct OmarchyLinkFakeHost {
                     "allDay": event.isAllDay,
                 ]
             }
+    }
+
+    private func calendarCreateProposal(
+        _ request: CalendarCreateRequest,
+        requestID: String
+    ) throws -> [String: Any] {
+        let calendars = try calendarProvider.calendars()
+        guard let calendar = calendars.first(where: { $0.id == request.calendarID }),
+              (1...256).contains(calendar.title.utf8.count) else {
+            throw OmarchyLinkProtocolError.invalidMessage
+        }
+        return [
+            "id": "calendar-proposal-\(requestID)",
+            "service": "calendar",
+            "operation": "event.create",
+            "title": request.title,
+            "startsAt": request.startsAt,
+            "endsAt": request.endsAt,
+            "calendar": ["id": calendar.id, "title": calendar.title],
+        ]
+    }
+
+    private static func calendarCreateRequest(
+        _ parameters: [String: Any]
+    ) throws -> CalendarCreateRequest {
+        guard let requestedTitle = parameters["title"] as? String,
+              let startValue = parameters["startsAt"] as? String,
+              let endValue = parameters["endsAt"] as? String,
+              let calendarID = parameters["calendarId"] as? String else {
+            throw OmarchyLinkProtocolError.invalidMessage
+        }
+        let title = requestedTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard (1...512).contains(title.utf8.count),
+              (1...64).contains(calendarID.utf8.count),
+              let start = canonicalDate(startValue),
+              let end = canonicalDate(endValue),
+              start < end else {
+            throw OmarchyLinkProtocolError.invalidMessage
+        }
+        return CalendarCreateRequest(
+            title: title,
+            startsAt: startValue,
+            endsAt: endValue,
+            calendarID: calendarID
+        )
     }
 
     private static func calendarQuery(_ parameters: [String: Any]) throws -> OmarchyLinkCalendarQuery {

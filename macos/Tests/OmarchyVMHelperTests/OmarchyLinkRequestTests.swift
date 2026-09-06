@@ -23,6 +23,43 @@ struct OmarchyLinkRequestTests {
         #expect(try host.complete("first").isEmpty)
     }
 
+    @Test("the fake host returns the exact canonical Calendar Mutation Proposal")
+    func canonicalizesCalendarMutationProposal() throws {
+        var host = try readyHost(calendar: .readWrite)
+        let request = try frame([
+            "type": "request",
+            "id": "create",
+            "method": "calendar.events.create.propose",
+            "params": [
+                "title": "  Invented planning session  ",
+                "startsAt": "2026-09-18T14:00:00Z",
+                "endsAt": "2026-09-18T15:00:00Z",
+                "calendarId": "invented-focus",
+            ],
+        ])
+
+        #expect(try host.receive(request).isEmpty)
+        let reply = try #require(try messages(host.complete("create")).first)
+        #expect(reply == [
+            "type": "response",
+            "id": "create",
+            "result": [
+                "proposal": [
+                    "id": "calendar-proposal-create",
+                    "service": "calendar",
+                    "operation": "event.create",
+                    "title": "Invented planning session",
+                    "startsAt": "2026-09-18T14:00:00Z",
+                    "endsAt": "2026-09-18T15:00:00Z",
+                    "calendar": [
+                        "id": "invented-focus",
+                        "title": "Invented Focus",
+                    ],
+                ],
+            ],
+        ])
+    }
+
     @Test("cancellation settles only pending work and cannot approve a Mutation Proposal")
     func cancelsPendingWork() throws {
         var host = try readyHost()
@@ -44,7 +81,7 @@ struct OmarchyLinkRequestTests {
     func allowListsDispatch() throws {
         for mode in [OmarchyLinkServiceMode.off, .read, .readWrite] {
             var host = try readyHost(calendar: mode)
-            for method in ["shell.exec", "sql.query", "calendar.events.create.propose", "proposal.approve"] {
+            for method in ["shell.exec", "sql.query", "calendar.events.create.perform", "proposal.approve"] {
                 let reply = try messages(host.receive(frame([
                     "type": "request", "id": method, "method": method, "params": [:],
                 ])))
