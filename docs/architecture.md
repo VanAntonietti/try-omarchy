@@ -45,6 +45,15 @@ fingerprint of what it last wrote so the immediate echo is dropped. The marker
 is cleared as soon as the other side moves on to new content, and expires after
 a couple of seconds regardless, so a genuine repeat of the same content still flows.
 
+The in-progress Omarchy Link design is not connected to QEMU or enabled in the
+product UI. New/reset factories carry an inert invented-data broker and
+a standalone Quickshell Calendar agenda proof, both gated by
+`OMARCHY_LINK_DEVELOPMENT=1`; they have no service, desktop entry, menu item, or
+automatic launch path. The Swift fake host and Rust surface obtain Calendar
+records through replaceable adapters. An EventKit adapter compiles behind the
+same Swift boundary but no production route constructs it, requests Calendar
+permission, or reads personal data.
+
 A separate virtio-serial port (`dev.tryomarchy.camera`) carries fixed-size
 1280×720 NV12 frames from an AVFoundation bridge in the signed Mac helper. The
 guest feeds those frames into an exclusive-capabilities `v4l2loopback` device,

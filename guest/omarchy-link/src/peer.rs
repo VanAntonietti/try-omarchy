@@ -3,13 +3,24 @@ use crate::{
     ProtocolError, ProtocolVersion, SessionFailure, decode_json, encode_json,
 };
 use serde::Deserialize;
-use serde_json::json;
-use std::collections::HashSet;
+use serde_json::{Value, json};
+use std::collections::HashMap;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub struct Calendar {
     pub id: String,
     pub title: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CalendarEvent {
+    pub id: String,
+    pub calendar_id: String,
+    pub title: String,
+    pub starts_at: String,
+    pub ends_at: String,
+    pub all_day: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
@@ -62,17 +73,27 @@ pub enum PeerMessage {
         id: String,
         calendars: Vec<Calendar>,
     },
+    Events {
+        id: String,
+        events: Vec<CalendarEvent>,
+    },
     Failed {
         id: String,
         failure: RequestFailure,
     },
 }
 
+#[derive(Clone, Copy)]
+enum PendingQuery {
+    Calendars,
+    Events,
+}
+
 /// A fake-data protocol peer, not a daemon or a connection to a Mac Service.
 pub struct GuestPeer {
     session: GuestSession,
     decoder: FrameDecoder,
-    pending: HashSet<String>,
+    pending: HashMap<String, PendingQuery>,
     next_id: u32,
     closed: bool,
     hello_sent: bool,
@@ -96,7 +117,7 @@ impl GuestPeer {
                 ProtocolVersion { major: 1, minor: 0 },
             ),
             decoder: FrameDecoder::default(),
-            pending: HashSet::new(),
+            pending: HashMap::new(),
             next_id: 1,
             closed: false,
             hello_sent: false,
@@ -136,12 +157,62 @@ impl GuestPeer {
         let frame = encode_json(&json!({
             "type": "request", "id": id, "method": "calendar.calendars.list", "params": {}
         }))?;
-        self.pending.insert(id.clone());
+        self.pending.insert(id.clone(), PendingQuery::Calendars);
+        Ok((id, frame))
+    }
+
+    pub fn list_events(
+        &mut self,
+        start: &str,
+        end: &str,
+        calendar_ids: &[String],
+    ) -> Result<(String, Vec<u8>), ProtocolError> {
+        if self.closed {
+            return Err(ProtocolError::ConnectionClosed);
+        }
+        let GuestSessionState::Available(session) = self.session.state() else {
+            return Err(ProtocolError::InvalidMessage);
+        };
+        if !session
+            .capabilities
+            .iter()
+            .any(|capability| capability.as_str() == "calendar.events.list")
+        {
+            return Err(ProtocolError::CapabilityUnavailable);
+        }
+        let (Some(start_seconds), Some(end_seconds)) =
+            (timestamp_seconds(start), timestamp_seconds(end))
+        else {
+            return Err(ProtocolError::InvalidMessage);
+        };
+        if end_seconds <= start_seconds
+            || end_seconds - start_seconds > 8 * 24 * 60 * 60
+            || calendar_ids.len() > 128
+            || calendar_ids.iter().any(|id| {
+                id.is_empty()
+                    || id.len() > 64
+                    || calendar_ids.iter().filter(|other| *other == id).count() != 1
+            })
+        {
+            return Err(ProtocolError::InvalidMessage);
+        }
+        if self.pending.len() >= 32 || self.next_id >= 1024 {
+            return Err(ProtocolError::ResourceLimit);
+        }
+        let id = format!("q{}", self.next_id);
+        self.next_id += 1;
+        let frame = encode_json(&json!({
+            "type": "request",
+            "id": id,
+            "method": "calendar.events.list",
+            "params": {"start": start, "end": end, "calendarIds": calendar_ids}
+        }))?;
+        self.pending.insert(id.clone(), PendingQuery::Events);
         Ok((id, frame))
     }
 
     pub fn cancel(&self, id: &str) -> Result<Vec<u8>, ProtocolError> {
-        if !self.pending.contains(id) {
+        if !self.pending.contains_key(id) {
             return Err(ProtocolError::InvalidMessage);
         }
         encode_json(&json!({"type": "cancel", "id": id}))
@@ -215,26 +286,53 @@ impl GuestPeer {
             let id = match &reply {
                 Reply::Response { id, .. } | Reply::Error { id, .. } => id,
             };
-            if !self.pending.remove(id) {
+            let Some(pending) = self.pending.remove(id) else {
                 return Err(ProtocolError::InvalidMessage);
-            }
+            };
             messages.push(match reply {
-                Reply::Response { id, result } => {
-                    if result.calendars.len() > 128
-                        || result.calendars.iter().any(|calendar| {
-                            calendar.id.is_empty()
-                                || calendar.id.len() > 64
-                                || calendar.title.is_empty()
-                                || calendar.title.len() > 256
-                        })
-                    {
-                        return Err(ProtocolError::InvalidMessage);
+                Reply::Response { id, result } => match pending {
+                    PendingQuery::Calendars => {
+                        let result: CalendarResult = serde_json::from_value(result)
+                            .map_err(|_| ProtocolError::InvalidMessage)?;
+                        if result.calendars.len() > 128
+                            || result.calendars.iter().any(|calendar| {
+                                calendar.id.is_empty()
+                                    || calendar.id.len() > 64
+                                    || calendar.title.is_empty()
+                                    || calendar.title.len() > 256
+                            })
+                        {
+                            return Err(ProtocolError::InvalidMessage);
+                        }
+                        PeerMessage::Calendars {
+                            id,
+                            calendars: result.calendars,
+                        }
                     }
-                    PeerMessage::Calendars {
-                        id,
-                        calendars: result.calendars,
+                    PendingQuery::Events => {
+                        let result: EventResult = serde_json::from_value(result)
+                            .map_err(|_| ProtocolError::InvalidMessage)?;
+                        if result.events.len() > 512
+                            || result.events.iter().any(|event| {
+                                event.id.is_empty()
+                                    || event.id.len() > 128
+                                    || event.calendar_id.is_empty()
+                                    || event.calendar_id.len() > 64
+                                    || event.title.is_empty()
+                                    || event.title.len() > 512
+                                    || !valid_timestamp(&event.starts_at)
+                                    || !valid_timestamp(&event.ends_at)
+                                    || event.starts_at >= event.ends_at
+                            })
+                        {
+                            return Err(ProtocolError::InvalidMessage);
+                        }
+                        PeerMessage::Events {
+                            id,
+                            events: result.events,
+                        }
                     }
-                }
+                },
                 Reply::Error { id, error } => {
                     if error.message.is_empty() || error.message.len() > 256 {
                         return Err(ProtocolError::InvalidMessage);
@@ -251,7 +349,7 @@ impl GuestPeer {
 #[serde(tag = "type")]
 enum Reply {
     #[serde(rename = "response")]
-    Response { id: String, result: CalendarResult },
+    Response { id: String, result: Value },
     #[serde(rename = "error")]
     Error { id: String, error: RequestFailure },
 }
@@ -268,4 +366,58 @@ struct Invalidation {
 #[derive(Deserialize)]
 struct CalendarResult {
     calendars: Vec<Calendar>,
+}
+
+#[derive(Deserialize)]
+struct EventResult {
+    events: Vec<CalendarEvent>,
+}
+
+fn valid_timestamp(value: &str) -> bool {
+    timestamp_seconds(value).is_some()
+}
+
+fn timestamp_seconds(value: &str) -> Option<u64> {
+    let bytes = value.as_bytes();
+    if bytes.len() != 20
+        || bytes[4] != b'-'
+        || bytes[7] != b'-'
+        || bytes[10] != b'T'
+        || bytes[13] != b':'
+        || bytes[16] != b':'
+        || bytes[19] != b'Z'
+        || !bytes.iter().enumerate().all(|(index, byte)| {
+            matches!(index, 4 | 7 | 10 | 13 | 16 | 19) || byte.is_ascii_digit()
+        })
+    {
+        return None;
+    }
+    let year = value[0..4].parse::<u64>().ok()?;
+    let month = value[5..7].parse::<u8>().ok()?;
+    let day = value[8..10].parse::<u64>().ok()?;
+    let hour = value[11..13].parse::<u64>().ok()?;
+    let minute = value[14..16].parse::<u64>().ok()?;
+    let second = value[17..19].parse::<u64>().ok()?;
+    if year == 0 || hour >= 24 || minute >= 60 || second >= 60 {
+        return None;
+    }
+    let leap = year.is_multiple_of(400) || (year.is_multiple_of(4) && !year.is_multiple_of(100));
+    let days_in_month = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap => 29,
+        2 => 28,
+        _ => return None,
+    };
+    if day == 0 || day > days_in_month {
+        return None;
+    }
+    let days_before_month = [0_u64, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334];
+    let previous_year = year - 1;
+    let days_before_year =
+        365 * previous_year + previous_year / 4 - previous_year / 100 + previous_year / 400;
+    let leap_day = u64::from(leap && month > 2);
+    let elapsed_days =
+        days_before_year + days_before_month[usize::from(month - 1)] + leap_day + day - 1;
+    Some(elapsed_days * 86_400 + hour * 3_600 + minute * 60 + second)
 }

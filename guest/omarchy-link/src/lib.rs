@@ -1,7 +1,14 @@
+mod agenda;
 mod peer;
 mod session;
 
-pub use peer::{Calendar, GuestPeer, MacService, PeerMessage, RequestFailure, RequestFailureCode};
+pub use agenda::{
+    AgendaCalendar, AgendaError, AgendaEvent, AgendaRange, AgendaSnapshot, AgendaWindow,
+    CalendarHostAdapter, DevelopmentAgendaBroker, InventedCalendarHostAdapter,
+};
+pub use peer::{
+    Calendar, CalendarEvent, GuestPeer, MacService, PeerMessage, RequestFailure, RequestFailureCode,
+};
 
 pub use session::{
     CapabilityName, ClientIdentity, GuestSession, GuestSessionState, NegotiatedSession,

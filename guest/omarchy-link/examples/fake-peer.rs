@@ -1,5 +1,7 @@
 //! Test-only stdio peer for the Swift loopback. All data is invented.
-use omarchy_link::{Calendar, GuestPeer, MacService, PeerMessage, RequestFailureCode};
+use omarchy_link::{
+    Calendar, CalendarEvent, GuestPeer, MacService, PeerMessage, RequestFailureCode,
+};
 use std::io::{self, Read, Write};
 
 fn main() {
@@ -14,7 +16,13 @@ fn main() {
     ));
 
     let (first, first_frame) = guest.list_calendars().unwrap();
-    let (second, second_frame) = guest.list_calendars().unwrap();
+    let (second, second_frame) = guest
+        .list_events(
+            "2026-09-14T00:00:00Z",
+            "2026-09-21T00:00:00Z",
+            &["invented-focus".to_owned()],
+        )
+        .unwrap();
     let (third, third_frame) = guest.list_calendars().unwrap();
     let batch = [
         first_frame,
@@ -29,16 +37,52 @@ fn main() {
     assert!(matches!(&messages[0], PeerMessage::Failed { id, failure }
         if id == &third && failure.code == RequestFailureCode::Cancelled));
     assert_eq!(messages[1], PeerMessage::Invalidated(MacService::Calendar));
-    assert!(matches!(&messages[2], PeerMessage::Failed { id, failure }
-        if id == &second && failure.code == RequestFailureCode::ServiceUnavailable));
+    assert_eq!(
+        messages[2],
+        PeerMessage::Events {
+            id: second,
+            events: vec![
+                CalendarEvent {
+                    id: "invented-planning".into(),
+                    calendar_id: "invented-focus".into(),
+                    title: "Project Aurora planning".into(),
+                    starts_at: "2026-09-14T09:00:00Z".into(),
+                    ends_at: "2026-09-14T09:45:00Z".into(),
+                    all_day: false,
+                },
+                CalendarEvent {
+                    id: "invented-review".into(),
+                    calendar_id: "invented-focus".into(),
+                    title: "Design review".into(),
+                    starts_at: "2026-09-15T15:00:00Z".into(),
+                    ends_at: "2026-09-15T16:00:00Z".into(),
+                    all_day: false,
+                },
+                CalendarEvent {
+                    id: "invented-wrap".into(),
+                    calendar_id: "invented-focus".into(),
+                    title: "Weekly wrap-up".into(),
+                    starts_at: "2026-09-20T00:00:00Z".into(),
+                    ends_at: "2026-09-21T00:00:00Z".into(),
+                    all_day: true,
+                },
+            ],
+        }
+    );
     assert_eq!(
         messages[3],
         PeerMessage::Calendars {
             id: first,
-            calendars: vec![Calendar {
-                id: "invented-calendar".into(),
-                title: "Invented Calendar".into()
-            }],
+            calendars: vec![
+                Calendar {
+                    id: "invented-focus".into(),
+                    title: "Invented Focus".into()
+                },
+                Calendar {
+                    id: "invented-personal".into(),
+                    title: "Invented Personal".into()
+                },
+            ],
         }
     );
     let mut trailing = [0; 1];

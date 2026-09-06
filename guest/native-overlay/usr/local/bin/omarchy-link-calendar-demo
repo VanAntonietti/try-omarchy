@@ -1,0 +1,14 @@
+#!/bin/bash
+
+set -euo pipefail
+
+if [[ ${OMARCHY_LINK_DEVELOPMENT:-0} != 1 ]]; then
+  echo "omarchy-link-calendar-demo: this invented-data surface requires OMARCHY_LINK_DEVELOPMENT=1" >&2
+  exit 69
+fi
+if (( $# != 0 )); then
+  echo "Usage: OMARCHY_LINK_DEVELOPMENT=1 omarchy-link-calendar-demo" >&2
+  exit 64
+fi
+
+exec quickshell -n -p /usr/share/try-omarchy/development/omarchy-link-calendar

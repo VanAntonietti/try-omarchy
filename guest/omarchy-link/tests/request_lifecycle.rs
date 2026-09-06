@@ -1,4 +1,6 @@
-use omarchy_link::{Calendar, GuestPeer, PeerMessage, RequestFailureCode, encode_json};
+use omarchy_link::{
+    Calendar, CalendarEvent, GuestPeer, PeerMessage, RequestFailureCode, encode_json,
+};
 use serde_json::json;
 
 #[test]
@@ -229,7 +231,7 @@ fn ready_guest() -> GuestPeer {
                 "type": "response", "id": "hello", "result": {
                     "protocol": {"major": 1, "minor": 0},
                     "server": {"name": "fake-host", "version": "1"},
-                    "capabilities": ["calendar.calendars.list"]
+                    "capabilities": ["calendar.calendars.list", "calendar.events.list"]
                 }
             }))
             .unwrap(),
@@ -237,6 +239,98 @@ fn ready_guest() -> GuestPeer {
         .unwrap();
     assert!(matches!(ready.as_slice(), [PeerMessage::Ready(_)]));
     guest
+}
+
+#[test]
+fn agenda_queries_are_typed_and_filtered_by_calendar_identifiers() {
+    let mut guest = ready_guest();
+    assert_eq!(
+        guest.list_events("2026-09-14T00:00:00Z", "2026-09-23T00:00:00Z", &[],),
+        Err(omarchy_link::ProtocolError::InvalidMessage)
+    );
+    let selected = vec!["invented-focus".to_owned()];
+    let (id, request) = guest
+        .list_events("2026-09-14T00:00:00Z", "2026-09-21T00:00:00Z", &selected)
+        .unwrap();
+    assert_eq!(
+        omarchy_link::decode_json(&request[4..]).unwrap(),
+        json!({
+            "type": "request",
+            "id": id,
+            "method": "calendar.events.list",
+            "params": {
+                "start": "2026-09-14T00:00:00Z",
+                "end": "2026-09-21T00:00:00Z",
+                "calendarIds": ["invented-focus"]
+            }
+        })
+    );
+
+    let messages = guest
+        .receive(
+            &encode_json(&json!({
+                "type": "response", "id": id,
+                "result": {"events": [{
+                    "id": "invented-planning",
+                    "calendarId": "invented-focus",
+                    "title": "Project Aurora planning",
+                    "startsAt": "2026-09-14T09:00:00Z",
+                    "endsAt": "2026-09-14T09:45:00Z",
+                    "allDay": false
+                }]}
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+    assert_eq!(
+        messages,
+        vec![PeerMessage::Events {
+            id,
+            events: vec![CalendarEvent {
+                id: "invented-planning".into(),
+                calendar_id: "invented-focus".into(),
+                title: "Project Aurora planning".into(),
+                starts_at: "2026-09-14T09:00:00Z".into(),
+                ends_at: "2026-09-14T09:45:00Z".into(),
+                all_day: false,
+            }]
+        }]
+    );
+}
+
+#[test]
+fn agenda_result_bounds_fail_closed() {
+    for event in [
+        json!({
+            "id": "",
+            "calendarId": "invented-focus",
+            "title": "Invalid",
+            "startsAt": "2026-09-14T09:00:00Z",
+            "endsAt": "2026-09-14T09:45:00Z",
+            "allDay": false
+        }),
+        json!({
+            "id": "event",
+            "calendarId": "invented-focus",
+            "title": "Invalid",
+            "startsAt": "not-a-date",
+            "endsAt": "2026-09-14T09:45:00Z",
+            "allDay": false
+        }),
+    ] {
+        let mut guest = ready_guest();
+        let (id, _) = guest
+            .list_events("2026-09-14T00:00:00Z", "2026-09-21T00:00:00Z", &[])
+            .unwrap();
+        let response = encode_json(&json!({
+            "type": "response", "id": id, "result": {"events": [event]}
+        }))
+        .unwrap();
+        assert_eq!(
+            guest.receive(&response),
+            Err(omarchy_link::ProtocolError::InvalidMessage)
+        );
+    }
 }
 
 #[test]

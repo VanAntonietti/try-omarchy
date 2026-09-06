@@ -7,21 +7,31 @@ enum OmarchyLinkMacService: String {
 }
 
 /// Invented data only. Work is queued until the harness explicitly completes it;
-/// no Apple adapter, VM transport, or Mutation Proposal executor is connected.
+/// no VM transport or Mutation Proposal executor is connected.
 struct OmarchyLinkFakeHost {
-    enum Outcome {
+    enum Outcome: Equatable {
         case success
         case unavailable
     }
 
+    private enum PendingWork {
+        case calendars
+        case events(OmarchyLinkCalendarQuery)
+    }
+
     private var session: OmarchyLinkHostSession
+    private let calendarProvider: any OmarchyLinkCalendarProviding
     private var decoder = OmarchyLinkFrameDecoder()
-    private var pending = Set<String>()
+    private var pending: [String: PendingWork] = [:]
     private var requestIDs = Set<String>()
     private var closed = false
 
-    init(serviceModes: OmarchyLinkServiceModes) {
+    init(
+        serviceModes: OmarchyLinkServiceModes,
+        calendarProvider: any OmarchyLinkCalendarProviding = InventedOmarchyLinkCalendarAdapter()
+    ) {
         session = OmarchyLinkHostSession(serviceModes: serviceModes)
+        self.calendarProvider = calendarProvider
     }
 
     mutating func receive(_ bytes: Data) throws -> Data {
@@ -60,24 +70,36 @@ struct OmarchyLinkFakeHost {
             return try OmarchyLinkFrameCodec.encodePayload(session.receive(payload).encodedMessage())
         }
         if type == "cancel" {
-            guard pending.remove(id) != nil else { return Data() }
+            guard pending.removeValue(forKey: id) != nil else { return Data() }
             return try failure(id, code: "request.cancelled", message: "The request was cancelled")
         }
         guard let method = envelope["method"] as? String, !method.isEmpty,
-              envelope["params"] is [String: Any] else {
+              let parameters = envelope["params"] as? [String: Any] else {
             throw OmarchyLinkProtocolError.invalidMessage
         }
         if method == "session.hello" {
             return try OmarchyLinkFrameCodec.encodePayload(session.receive(payload).encodedMessage())
         }
-        guard method == OmarchyLinkCapability.calendarList.rawValue,
-              negotiated.capabilities.contains(.calendarList) else {
-            return try failure(id, code: "request.method_unavailable", message: "The Capability is not available")
+
+        let work: PendingWork
+        switch method {
+        case OmarchyLinkCapability.calendarList.rawValue
+            where negotiated.capabilities.contains(.calendarList):
+            work = .calendars
+        case OmarchyLinkCapability.calendarEventList.rawValue
+            where negotiated.capabilities.contains(.calendarEventList):
+            work = .events(try Self.calendarQuery(parameters))
+        default:
+            return try failure(
+                id,
+                code: "request.method_unavailable",
+                message: "The Capability is not available"
+            )
         }
         guard pending.count < 32 else {
             return try failure(id, code: "request.busy", message: "Too many pending requests")
         }
-        pending.insert(id)
+        pending[id] = work
         return Data()
     }
 
@@ -109,16 +131,102 @@ struct OmarchyLinkFakeHost {
     }
 
     mutating func complete(_ id: String, outcome: Outcome = .success) throws -> Data {
-        guard pending.remove(id) != nil else { return Data() }
-        switch outcome {
-        case .success:
-            return try OmarchyLinkFrameCodec.encodeJSONObject([
-                "type": "response", "id": id,
-                "result": ["calendars": [["id": "invented-calendar", "title": "Invented Calendar"]]],
-            ])
-        case .unavailable:
-            return try failure(id, code: "service.unavailable", message: "The fake Calendar service is unavailable")
+        guard let work = pending.removeValue(forKey: id) else { return Data() }
+        guard outcome == .success else {
+            return try failure(
+                id,
+                code: "service.unavailable",
+                message: "The fake Calendar service is unavailable"
+            )
         }
+        do {
+            let result: [String: Any]
+            switch work {
+            case .calendars:
+                result = ["calendars": try calendarObjects()]
+            case .events(let query):
+                result = ["events": try eventObjects(matching: query)]
+            }
+            return try OmarchyLinkFrameCodec.encodeJSONObject([
+                "type": "response", "id": id, "result": result,
+            ])
+        } catch {
+            return try failure(
+                id,
+                code: "service.unavailable",
+                message: "The fake Calendar service is unavailable"
+            )
+        }
+    }
+
+    private func calendarObjects() throws -> [[String: Any]] {
+        let calendars = try calendarProvider.calendars()
+        guard calendars.count <= 128,
+              calendars.allSatisfy({
+                  (1...64).contains($0.id.utf8.count)
+                      && (1...256).contains($0.title.utf8.count)
+              }) else {
+            throw OmarchyLinkProtocolError.invalidMessage
+        }
+        return calendars.map { ["id": $0.id, "title": $0.title] }
+    }
+
+    private func eventObjects(matching query: OmarchyLinkCalendarQuery) throws -> [[String: Any]] {
+        let events = try calendarProvider.events(matching: query)
+        guard events.count <= 512,
+              events.allSatisfy({ event in
+                  (1...128).contains(event.id.utf8.count)
+                      && (1...64).contains(event.calendarID.utf8.count)
+                      && (1...512).contains(event.title.utf8.count)
+                      && event.startDate < event.endDate
+                      && event.startDate < query.endDate
+                      && event.endDate > query.startDate
+                      && (query.calendarIDs.isEmpty
+                          || query.calendarIDs.contains(event.calendarID))
+              }) else {
+            throw OmarchyLinkProtocolError.invalidMessage
+        }
+        let formatter = ISO8601DateFormatter()
+        return events
+            .sorted { ($0.startDate, $0.id) < ($1.startDate, $1.id) }
+            .map { event in
+                [
+                    "id": event.id,
+                    "calendarId": event.calendarID,
+                    "title": event.title,
+                    "startsAt": formatter.string(from: event.startDate),
+                    "endsAt": formatter.string(from: event.endDate),
+                    "allDay": event.isAllDay,
+                ]
+            }
+    }
+
+    private static func calendarQuery(_ parameters: [String: Any]) throws -> OmarchyLinkCalendarQuery {
+        guard let startValue = parameters["start"] as? String,
+              let endValue = parameters["end"] as? String,
+              let calendarIDs = parameters["calendarIds"] as? [String],
+              calendarIDs.count <= 128,
+              Set(calendarIDs).count == calendarIDs.count,
+              calendarIDs.allSatisfy({ (1...64).contains($0.utf8.count) }),
+              let start = canonicalDate(startValue),
+              let end = canonicalDate(endValue),
+              start < end,
+              end.timeIntervalSince(start) <= 8 * 24 * 60 * 60 else {
+            throw OmarchyLinkProtocolError.invalidMessage
+        }
+        return OmarchyLinkCalendarQuery(
+            startDate: start,
+            endDate: end,
+            calendarIDs: Set(calendarIDs)
+        )
+    }
+
+    private static func canonicalDate(_ value: String) -> Date? {
+        let formatter = ISO8601DateFormatter()
+        guard let date = formatter.date(from: value), formatter.string(from: date) == value else {
+            return nil
+        }
+        return date
     }
 
     private func failure(_ id: String, code: String, message: String) throws -> Data {

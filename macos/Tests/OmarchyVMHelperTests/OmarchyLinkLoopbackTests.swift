@@ -32,7 +32,7 @@ struct OmarchyLinkLoopbackTests {
         let hello = try readFrame(output.fileHandleForReading, deadline: deadline)
         try input.fileHandleForWriting.write(contentsOf: host.receive(hello))
 
-        // Three concurrent Queries, followed by cancellation of the third.
+        // Concurrent Calendar-list and agenda Queries, then cancellation.
         var replies = Data()
         for _ in 0..<4 {
             let frame = try readFrame(output.fileHandleForReading, deadline: deadline)
@@ -41,7 +41,7 @@ struct OmarchyLinkLoopbackTests {
         }
         #expect(try host.complete("q3").isEmpty)
         replies.append(try host.invalidate(.calendar))
-        replies.append(try host.complete("q2", outcome: .unavailable))
+        replies.append(try host.complete("q2"))
         replies.append(try host.complete("q1"))
         // Also split a host frame inside its header across pipe writes.
         try input.fileHandleForWriting.write(contentsOf: replies.prefix(1))

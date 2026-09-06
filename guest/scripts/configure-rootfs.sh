@@ -79,6 +79,7 @@ chmod 0755 \
   "$root/usr/local/bin/omarchy-native-cursor-restore" \
   "$root/usr/local/bin/omarchy-native-display-sync" \
   "$root/usr/local/bin/omarchy-native-mac-share" \
+  "$root/usr/local/bin/omarchy-link-calendar-demo" \
   "$root/usr/lib/systemd/system-generators/try-omarchy-ssh-access"
 for native_command in \
   omarchy-audio-input-set-default \

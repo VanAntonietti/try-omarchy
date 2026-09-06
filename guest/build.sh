@@ -75,7 +75,7 @@ package_lock_file="$guest_dir/$package_lock_file"
 [[ -f $packages_file ]] || fail "package list not found: $packages_file"
 [[ -f $package_lock_file ]] || fail "package lock not found: $package_lock_file"
 (( EUID == 0 )) || fail "run as root (pacstrap and arch-chroot require it)"
-for command in pacstrap arch-chroot curl git gzip python3 mke2fs repo-add sha256sum zstd; do
+for command in pacstrap arch-chroot cargo curl git gzip python3 mke2fs repo-add sha256sum zstd; do
   command -v "$command" >/dev/null || fail "$command is required; use the supplied Arch builder container"
 done
 
@@ -228,6 +228,9 @@ python3 "$guest_dir/scripts/verify-background-switcher-override.py" \
 "$guest_dir/scripts/materialize-omarchy.sh" --root "$root" --source "$source_dir" --spec "$spec"
 python3 "$guest_dir/scripts/apply-omarchy-backports.py" --root "$root" --spec "$spec"
 "$guest_dir/scripts/configure-rootfs.sh" --root "$root" --spec "$spec"
+"$guest_dir/scripts/install-omarchy-link-development.sh" \
+  --root "$root" \
+  --work "$work"
 "$guest_dir/scripts/register-omarchy-runtime.sh" \
   --root "$root" \
   --work "$work" \

@@ -15,7 +15,10 @@ struct OmarchyLinkRequestTests {
         ]]])
         let first = try messages(host.complete("first"))
         #expect(first == [["type": "response", "id": "first", "result": [
-            "calendars": [["id": "invented-calendar", "title": "Invented Calendar"]],
+            "calendars": [
+                ["id": "invented-focus", "title": "Invented Focus"],
+                ["id": "invented-personal", "title": "Invented Personal"],
+            ],
         ]]])
         #expect(try host.complete("first").isEmpty)
     }
