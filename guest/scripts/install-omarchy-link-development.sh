@@ -56,4 +56,4 @@ binary="$target_dir/release/omarchy-link"
 install -d -m 0755 "$root/usr/local/bin"
 install -m 0755 "$binary" "$root/usr/local/bin/omarchy-link"
 
-echo "Installed the development-only Omarchy Link broker"
+echo "Installed the Owner-local Omarchy Link broker (host transport unavailable)"

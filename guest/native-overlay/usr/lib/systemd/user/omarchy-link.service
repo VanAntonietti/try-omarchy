@@ -1,0 +1,16 @@
+[Unit]
+Description=Omarchy Link Owner-local broker
+ConditionUser=1000
+
+[Service]
+ExecStart=/usr/local/bin/omarchy-link daemon
+RuntimeDirectory=omarchy-link
+RuntimeDirectoryMode=0700
+UMask=0077
+LimitCORE=0
+StandardOutput=null
+StandardError=null
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=default.target
