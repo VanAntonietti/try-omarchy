@@ -309,7 +309,8 @@ you choose — it never creates a folder inside it on your behalf.
 
 ## Development requirements
 
-- Xcode command-line tools with Swift 6
+- Xcode command-line tools with Swift 6 (select full Xcode if Swift Testing is unavailable)
+- Rust/Cargo 1.85 or newer for the offline Omarchy Link tests (`brew install rust`)
 - Python 3
 - `pkg-config` (Homebrew is the simplest way to install it)
 - A running Docker-compatible engine that supports privileged `linux/arm64`
@@ -358,6 +359,12 @@ Run the complete contract and native test suite with:
 ```sh
 make test
 ```
+
+`make test` includes the vendored Rust protocol tests (`cargo test --locked --offline`),
+Swift protocol tests, and a fake-data Swift↔Rust pipe loopback. No Apple-service
+permissions or running VM are needed for these protocol tests. If Swift reports
+`no such module 'Testing'`, run with
+`DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer make test`.
 
 Run `make help` for component builds, persistent-storage reset, ephemeral mode, and cleanup commands.
 

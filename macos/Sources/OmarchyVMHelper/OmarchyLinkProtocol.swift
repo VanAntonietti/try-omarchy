@@ -4,6 +4,10 @@ enum OmarchyLinkProtocolError: LocalizedError, Equatable {
     case emptyFrame
     case frameTooLarge(Int)
     case invalidJSONObject
+    case invalidMessage
+    case resourceLimit
+    case connectionClosed
+    case truncatedFrame
 
     var errorDescription: String? {
         switch self {
@@ -13,6 +17,14 @@ enum OmarchyLinkProtocolError: LocalizedError, Equatable {
             "Omarchy Link frame is too large (\(size) bytes)"
         case .invalidJSONObject:
             "Omarchy Link payload must be one valid JSON object"
+        case .invalidMessage:
+            "Omarchy Link message does not match the protocol schema"
+        case .resourceLimit:
+            "Omarchy Link peer resource limit exceeded"
+        case .connectionClosed:
+            "Omarchy Link peer is closed"
+        case .truncatedFrame:
+            "Omarchy Link ended with an incomplete frame"
         }
     }
 }
@@ -36,7 +48,10 @@ enum OmarchyLinkFrameCodec {
 
     static func decodeJSONObject(_ payload: Data) throws -> [String: Any] {
         try validatePayloadSize(payload.count)
-        guard let object = try? JSONSerialization.jsonObject(with: payload),
+        // JSONSerialization also auto-detects UTF-16/32. The wire requires
+        // UTF-8; raw NUL is illegal JSON and excludes those encodings.
+        guard !payload.contains(0), String(data: payload, encoding: .utf8) != nil,
+              let object = try? JSONSerialization.jsonObject(with: payload),
               let dictionary = object as? [String: Any] else {
             throw OmarchyLinkProtocolError.invalidJSONObject
         }
@@ -48,9 +63,7 @@ enum OmarchyLinkFrameCodec {
         // Raw payload framing is intentionally internal to protocol tests and
         // the broker. Callers send objects through encodeJSONObject so an
         // invalid or scalar JSON root cannot enter the channel.
-        guard (try? JSONSerialization.jsonObject(with: payload)) is [String: Any] else {
-            throw OmarchyLinkProtocolError.invalidJSONObject
-        }
+        _ = try decodeJSONObject(payload)
 
         var length = UInt32(payload.count).bigEndian
         var frame = Data(capacity: headerByteCount + payload.count)

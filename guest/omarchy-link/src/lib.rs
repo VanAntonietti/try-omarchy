@@ -1,4 +1,7 @@
+mod peer;
 mod session;
+
+pub use peer::{Calendar, GuestPeer, MacService, PeerMessage, RequestFailure, RequestFailureCode};
 
 pub use session::{
     CapabilityName, ClientIdentity, GuestSession, GuestSessionState, NegotiatedSession,
@@ -16,15 +19,30 @@ pub enum ProtocolError {
     EmptyFrame,
     FrameTooLarge(usize),
     InvalidJsonObject,
+    InvalidMessage,
+    ResourceLimit,
+    ConnectionClosed,
+    TruncatedFrame,
+    CapabilityUnavailable,
 }
 
 impl fmt::Display for ProtocolError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::CapabilityUnavailable => write!(formatter, "The Capability is not available"),
+            Self::ResourceLimit => write!(formatter, "Omarchy Link peer resource limit exceeded"),
+            Self::ConnectionClosed => write!(formatter, "Omarchy Link peer is closed"),
+            Self::TruncatedFrame => {
+                write!(formatter, "Omarchy Link ended with an incomplete frame")
+            }
             Self::EmptyFrame => write!(formatter, "Omarchy Link frames cannot be empty"),
             Self::FrameTooLarge(size) => {
                 write!(formatter, "Omarchy Link frame is too large ({size} bytes)")
             }
+            Self::InvalidMessage => write!(
+                formatter,
+                "Omarchy Link message does not match the protocol schema"
+            ),
             Self::InvalidJsonObject => {
                 write!(
                     formatter,

@@ -53,6 +53,7 @@ doctor:
 	@printf 'Toolchain ready: %s (%s)\n' "$$(sw_vers -productVersion)" "$$(uname -m)"
 
 test:
+	@cd "$(ROOT)/guest/omarchy-link" && cargo test --locked --offline
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/tests/test-build-cache.py"
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/tests/test-pack-app-icon.py"
 	@$(ROOT)/guest/test
