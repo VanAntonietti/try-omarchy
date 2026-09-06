@@ -84,6 +84,27 @@ ShellRoot {
     root.refresh()
   }
 
+  function createCalendarIdentifier() {
+    if (root.selectedCalendar) return root.selectedCalendar
+    var calendars = root.snapshot.calendars || []
+    return calendars.length > 0 ? calendars[0].id : ""
+  }
+
+  function reviewCreate() {
+    var calendar = root.createCalendarIdentifier()
+    if (!calendar || reviewProcess.running) return
+    reviewProcess.command = [
+      "foot", "--hold", "--title=Omarchy Link Calendar review",
+      "/usr/bin/env", "OMARCHY_LINK_DEVELOPMENT=1",
+      "/usr/local/bin/omarchy-link", "demo-create",
+      "--title", createTitle.text,
+      "--start", createStart.text,
+      "--end", createEnd.text,
+      "--calendar", calendar
+    ]
+    reviewProcess.running = true
+  }
+
   component FilterChip: Rectangle {
     id: chip
     required property string label
@@ -115,6 +136,18 @@ ShellRoot {
       cursorShape: Qt.PointingHandCursor
       enabled: !root.loading
       onClicked: chip.activated()
+    }
+  }
+
+  Process {
+    id: reviewProcess
+    onExited: function(exitCode) {
+      if (exitCode === 126 || exitCode === 127)
+        root.failure = JSON.stringify({
+          status: "blocked",
+          code: "review.ui_unavailable",
+          performed: false
+        })
     }
   }
 
@@ -391,6 +424,92 @@ ShellRoot {
                   }
                 }
               }
+            }
+          }
+        }
+
+        Rectangle {
+          Layout.fillWidth: true
+          implicitHeight: createForm.implicitHeight + 24
+          radius: 10
+          color: root.surface
+          border.width: 1
+          border.color: "#414868"
+
+          GridLayout {
+            id: createForm
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.leftMargin: 16
+            anchors.rightMargin: 16
+            columns: 4
+            rowSpacing: 8
+            columnSpacing: 10
+
+            Text {
+              textFormat: Text.PlainText
+              text: "Create invented event"
+              color: root.foreground
+              font.family: "monospace"
+              font.pixelSize: 14
+              font.bold: true
+            }
+            TextField {
+              id: createTitle
+              Layout.fillWidth: true
+              Layout.columnSpan: 3
+              text: "Invented planning session"
+              placeholderText: "Title"
+              color: root.foreground
+              font.family: "monospace"
+            }
+
+            Text {
+              textFormat: Text.PlainText
+              text: "Start"
+              color: root.muted
+              font.family: "monospace"
+              font.pixelSize: 12
+            }
+            TextField {
+              id: createStart
+              Layout.fillWidth: true
+              text: root.demoDate + "T14:00:00Z"
+              color: root.foreground
+              font.family: "monospace"
+            }
+            Text {
+              textFormat: Text.PlainText
+              text: "End"
+              color: root.muted
+              font.family: "monospace"
+              font.pixelSize: 12
+            }
+            TextField {
+              id: createEnd
+              Layout.fillWidth: true
+              text: root.demoDate + "T15:00:00Z"
+              color: root.foreground
+              font.family: "monospace"
+            }
+
+            Text {
+              Layout.columnSpan: 3
+              Layout.fillWidth: true
+              textFormat: Text.PlainText
+              text: "The host-canonical title, time, and calendar open in a one-shot terminal review."
+              color: root.muted
+              font.family: "monospace"
+              font.pixelSize: 11
+              wrapMode: Text.WordWrap
+            }
+            Button {
+              text: reviewProcess.running ? "Review open" : "Review event"
+              enabled: !reviewProcess.running
+                && createTitle.text.trim().length > 0
+                && root.createCalendarIdentifier() !== ""
+              onClicked: root.reviewCreate()
             }
           }
         }

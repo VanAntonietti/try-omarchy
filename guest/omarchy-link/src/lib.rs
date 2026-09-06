@@ -1,4 +1,5 @@
 mod agenda;
+mod mutation;
 mod peer;
 mod session;
 
@@ -6,8 +7,14 @@ pub use agenda::{
     AgendaCalendar, AgendaError, AgendaEvent, AgendaRange, AgendaSnapshot, AgendaWindow,
     CalendarHostAdapter, DevelopmentAgendaBroker, InventedCalendarHostAdapter,
 };
+pub use mutation::{
+    CalendarCreateRequest, DevelopmentMutationBroker, MutationError, ReviewDecision,
+    ReviewFailureCode, ReviewInterlock, ReviewPresentation, ReviewResult, ReviewStatus,
+    ReviewUiState,
+};
 pub use peer::{
-    Calendar, CalendarEvent, GuestPeer, MacService, PeerMessage, RequestFailure, RequestFailureCode,
+    Calendar, CalendarEvent, CalendarMutationProposal, GuestPeer, MacService, PeerMessage,
+    ProposalCalendar, RequestFailure, RequestFailureCode,
 };
 
 pub use session::{

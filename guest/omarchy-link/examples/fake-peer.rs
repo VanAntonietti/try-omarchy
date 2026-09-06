@@ -24,21 +24,41 @@ fn main() {
         )
         .unwrap();
     let (third, third_frame) = guest.list_calendars().unwrap();
+    let (fourth, fourth_frame) = guest
+        .propose_calendar_event(
+            "  Invented planning session  ",
+            "2026-09-18T14:00:00Z",
+            "2026-09-18T15:00:00Z",
+            "invented-focus",
+        )
+        .unwrap();
     let batch = [
         first_frame,
         second_frame,
         third_frame,
+        fourth_frame,
         guest.cancel(&third).unwrap(),
     ]
     .concat();
     output.write_all(&batch).unwrap();
     output.flush().unwrap();
-    let messages = receive(&mut guest, &mut input, 4);
+    let messages = receive(&mut guest, &mut input, 5);
     assert!(matches!(&messages[0], PeerMessage::Failed { id, failure }
         if id == &third && failure.code == RequestFailureCode::Cancelled));
     assert_eq!(messages[1], PeerMessage::Invalidated(MacService::Calendar));
+    assert!(matches!(
+        &messages[2],
+        PeerMessage::MutationProposed { id, proposal }
+            if id == &fourth
+                && proposal.id == "calendar-proposal-q4"
+                && proposal.title == "Invented planning session"
+                && proposal.starts_at == "2026-09-18T14:00:00Z"
+                && proposal.ends_at == "2026-09-18T15:00:00Z"
+                && proposal.calendar.id == "invented-focus"
+                && proposal.calendar.title == "Invented Focus"
+    ));
     assert_eq!(
-        messages[2],
+        messages[3],
         PeerMessage::Events {
             id: second,
             events: vec![
@@ -70,7 +90,7 @@ fn main() {
         }
     );
     assert_eq!(
-        messages[3],
+        messages[4],
         PeerMessage::Calendars {
             id: first,
             calendars: vec![

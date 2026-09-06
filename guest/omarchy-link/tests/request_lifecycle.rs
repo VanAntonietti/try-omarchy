@@ -4,6 +4,62 @@ use omarchy_link::{
 use serde_json::json;
 
 #[test]
+fn calendar_create_requests_receive_the_host_canonical_mutation_proposal() {
+    let mut guest = ready_guest();
+    let (id, request) = guest
+        .propose_calendar_event(
+            "  Invented planning session  ",
+            "2026-09-18T14:00:00Z",
+            "2026-09-18T15:00:00Z",
+            "invented-focus",
+        )
+        .unwrap();
+    assert_eq!(
+        omarchy_link::decode_json(&request[4..]).unwrap(),
+        json!({
+            "type": "request",
+            "id": id,
+            "method": "calendar.events.create.propose",
+            "params": {
+                "title": "  Invented planning session  ",
+                "startsAt": "2026-09-18T14:00:00Z",
+                "endsAt": "2026-09-18T15:00:00Z",
+                "calendarId": "invented-focus"
+            }
+        })
+    );
+
+    let messages = guest
+        .receive(
+            &encode_json(&json!({
+                "type": "response",
+                "id": id,
+                "result": {"proposal": {
+                    "id": "calendar-proposal-q1",
+                    "service": "calendar",
+                    "operation": "event.create",
+                    "title": "Invented planning session",
+                    "startsAt": "2026-09-18T14:00:00Z",
+                    "endsAt": "2026-09-18T15:00:00Z",
+                    "calendar": {"id": "invented-focus", "title": "Invented Focus"}
+                }}
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+    assert!(
+        matches!(messages.as_slice(), [PeerMessage::MutationProposed { id: reply_id, proposal }]
+        if reply_id == &id
+            && proposal.id == "calendar-proposal-q1"
+            && proposal.title == "Invented planning session"
+            && proposal.starts_at == "2026-09-18T14:00:00Z"
+            && proposal.ends_at == "2026-09-18T15:00:00Z"
+            && proposal.calendar.id == "invented-focus"
+            && proposal.calendar.title == "Invented Focus")
+    );
+}
+
+#[test]
 fn cancellation_is_not_approval_and_waits_for_the_correlated_terminal_reply() {
     let mut guest = ready_guest();
     let (id, _) = guest.list_calendars().unwrap();
@@ -231,7 +287,11 @@ fn ready_guest() -> GuestPeer {
                 "type": "response", "id": "hello", "result": {
                     "protocol": {"major": 1, "minor": 0},
                     "server": {"name": "fake-host", "version": "1"},
-                    "capabilities": ["calendar.calendars.list", "calendar.events.list"]
+                    "capabilities": [
+                        "calendar.calendars.list",
+                        "calendar.events.create.propose",
+                        "calendar.events.list"
+                    ]
                 }
             }))
             .unwrap(),

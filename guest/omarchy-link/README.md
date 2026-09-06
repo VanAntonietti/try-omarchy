@@ -1,6 +1,6 @@
 # Omarchy Link guest scaffold
 
-This is the proposed compiled guest broker/CLI. It contains the shared v1 frame codec, typed fake-data request peer with Link Session negotiation, and an invented Calendar agenda model. It cannot access host data. The daemon and production `call` command remain placeholders.
+This is the proposed compiled guest broker/CLI. It contains the shared v1 frame codec, typed fake-data request peer with Link Session negotiation, an invented Calendar agenda model, and a development-only Calendar Mutation Proposal Review Interlock. It cannot access host data. The daemon and production `call` command remain placeholders.
 
 The dependency graph is exact-version locked and vendored. Tests therefore run without network access:
 
@@ -27,6 +27,8 @@ OMARCHY_LINK_DEVELOPMENT=1 omarchy-link-calendar-demo
 
 The surface offers **Today** and **Next 7 days** ranges and refetches through `DevelopmentAgendaBroker` and `InventedCalendarHostAdapter` when a calendar filter changes. The broker negotiates an in-memory fake Link Session and accepts the adapter's Calendar responses through the same typed `GuestPeer` used by protocol tests. Event and calendar fixtures live only behind that adapter; the QML view parses broker JSON and contains none of them.
 
+The surface also carries an editable invented create request. **Review event** opens a terminal that obtains a host-canonical Mutation Proposal and shows its exact title, start, end, and resolved calendar. Approval, rejection, and dismissal are one-shot outcomes, and changing the request starts with a new proposal. The broker refuses review while logind reports the session locked, when the Wayland review UI is unavailable, or when stdin/stdout are not a terminal. Those cases return typed `review.*` results; there is no perform route, and the CLI accepts no argument that approves a proposal.
+
 For deterministic review evidence with the same invented records used by tests:
 
 ```sh
@@ -35,7 +37,7 @@ OMARCHY_LINK_DEMO_DATE=2026-09-14 \
 omarchy-link-calendar-demo
 ```
 
-No command above contacts the Mac helper, constructs EventKit, asks for an Apple permission, or reads Calendar data. A compiling EventKit adapter exists only behind the injected Swift Calendar interface for a later real-service ticket.
+No command above contacts the Mac helper, constructs EventKit, asks for an Apple permission, reads Calendar data, or performs a host mutation. A compiling EventKit adapter exists only behind the injected Swift Calendar interface for a later real-service ticket.
 
 To refresh dependencies deliberately, update the exact versions in `Cargo.toml`, review `Cargo.lock` and every source/license change, then run:
 

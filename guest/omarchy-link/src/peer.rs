@@ -2,7 +2,7 @@ use crate::{
     ClientIdentity, FrameDecoder, GuestSession, GuestSessionState, NegotiatedSession,
     ProtocolError, ProtocolVersion, SessionFailure, decode_json, encode_json,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 
@@ -21,6 +21,24 @@ pub struct CalendarEvent {
     pub starts_at: String,
     pub ends_at: String,
     pub all_day: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ProposalCalendar {
+    pub id: String,
+    pub title: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CalendarMutationProposal {
+    pub id: String,
+    pub service: String,
+    pub operation: String,
+    pub title: String,
+    pub starts_at: String,
+    pub ends_at: String,
+    pub calendar: ProposalCalendar,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
@@ -77,6 +95,10 @@ pub enum PeerMessage {
         id: String,
         events: Vec<CalendarEvent>,
     },
+    MutationProposed {
+        id: String,
+        proposal: CalendarMutationProposal,
+    },
     Failed {
         id: String,
         failure: RequestFailure,
@@ -87,6 +109,7 @@ pub enum PeerMessage {
 enum PendingQuery {
     Calendars,
     Events,
+    CalendarCreateProposal,
 }
 
 /// A fake-data protocol peer, not a daemon or a connection to a Mac Service.
@@ -211,6 +234,60 @@ impl GuestPeer {
         Ok((id, frame))
     }
 
+    pub fn propose_calendar_event(
+        &mut self,
+        title: &str,
+        starts_at: &str,
+        ends_at: &str,
+        calendar_id: &str,
+    ) -> Result<(String, Vec<u8>), ProtocolError> {
+        if self.closed {
+            return Err(ProtocolError::ConnectionClosed);
+        }
+        let GuestSessionState::Available(session) = self.session.state() else {
+            return Err(ProtocolError::InvalidMessage);
+        };
+        if !session
+            .capabilities
+            .iter()
+            .any(|capability| capability.as_str() == "calendar.events.create.propose")
+        {
+            return Err(ProtocolError::CapabilityUnavailable);
+        }
+        let (Some(start_seconds), Some(end_seconds)) =
+            (timestamp_seconds(starts_at), timestamp_seconds(ends_at))
+        else {
+            return Err(ProtocolError::InvalidMessage);
+        };
+        if title.is_empty()
+            || title.len() > 512
+            || end_seconds <= start_seconds
+            || calendar_id.is_empty()
+            || calendar_id.len() > 64
+        {
+            return Err(ProtocolError::InvalidMessage);
+        }
+        if self.pending.len() >= 32 || self.next_id >= 1024 {
+            return Err(ProtocolError::ResourceLimit);
+        }
+        let id = format!("q{}", self.next_id);
+        self.next_id += 1;
+        let frame = encode_json(&json!({
+            "type": "request",
+            "id": id,
+            "method": "calendar.events.create.propose",
+            "params": {
+                "title": title,
+                "startsAt": starts_at,
+                "endsAt": ends_at,
+                "calendarId": calendar_id
+            }
+        }))?;
+        self.pending
+            .insert(id.clone(), PendingQuery::CalendarCreateProposal);
+        Ok((id, frame))
+    }
+
     pub fn cancel(&self, id: &str) -> Result<Vec<u8>, ProtocolError> {
         if !self.pending.contains_key(id) {
             return Err(ProtocolError::InvalidMessage);
@@ -332,6 +409,28 @@ impl GuestPeer {
                             events: result.events,
                         }
                     }
+                    PendingQuery::CalendarCreateProposal => {
+                        let result: MutationProposalResult = serde_json::from_value(result)
+                            .map_err(|_| ProtocolError::InvalidMessage)?;
+                        let proposal = result.proposal;
+                        if proposal.id.is_empty()
+                            || proposal.id.len() > 128
+                            || proposal.service != "calendar"
+                            || proposal.operation != "event.create"
+                            || proposal.title.is_empty()
+                            || proposal.title.len() > 512
+                            || proposal.calendar.id.is_empty()
+                            || proposal.calendar.id.len() > 64
+                            || proposal.calendar.title.is_empty()
+                            || proposal.calendar.title.len() > 256
+                            || !valid_timestamp(&proposal.starts_at)
+                            || !valid_timestamp(&proposal.ends_at)
+                            || proposal.starts_at >= proposal.ends_at
+                        {
+                            return Err(ProtocolError::InvalidMessage);
+                        }
+                        PeerMessage::MutationProposed { id, proposal }
+                    }
                 },
                 Reply::Error { id, error } => {
                     if error.message.is_empty() || error.message.len() > 256 {
@@ -373,11 +472,16 @@ struct EventResult {
     events: Vec<CalendarEvent>,
 }
 
+#[derive(Deserialize)]
+struct MutationProposalResult {
+    proposal: CalendarMutationProposal,
+}
+
 fn valid_timestamp(value: &str) -> bool {
     timestamp_seconds(value).is_some()
 }
 
-fn timestamp_seconds(value: &str) -> Option<u64> {
+pub(crate) fn timestamp_seconds(value: &str) -> Option<u64> {
     let bytes = value.as_bytes();
     if bytes.len() != 20
         || bytes[4] != b'-'

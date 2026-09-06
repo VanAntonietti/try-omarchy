@@ -5,7 +5,7 @@ import Testing
 
 @Suite("Omarchy Link cross-language loopback")
 struct OmarchyLinkLoopbackTests {
-    @Test("a real Rust guest exchanges framed Queries, cancellation, and Invalidation with the Swift fake host")
+    @Test("a real Rust guest exchanges Queries and a canonical Mutation Proposal with the Swift fake host")
     func exchangesWithRustGuest() throws {
         let repository = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent()
@@ -28,19 +28,20 @@ struct OmarchyLinkLoopbackTests {
             process.waitUntilExit()
         }
         let deadline = ContinuousClock.now.advanced(by: .seconds(30))
-        var host = OmarchyLinkFakeHost(serviceModes: .init(calendar: .read, messages: .off, notes: .off))
+        var host = OmarchyLinkFakeHost(serviceModes: .init(calendar: .readWrite, messages: .off, notes: .off))
         let hello = try readFrame(output.fileHandleForReading, deadline: deadline)
         try input.fileHandleForWriting.write(contentsOf: host.receive(hello))
 
-        // Concurrent Calendar-list and agenda Queries, then cancellation.
+        // Concurrent Calendar Queries and one Mutation Proposal, then cancellation.
         var replies = Data()
-        for _ in 0..<4 {
+        for _ in 0..<5 {
             let frame = try readFrame(output.fileHandleForReading, deadline: deadline)
             #expect(try host.receive(frame.prefix(2)).isEmpty)
             replies.append(try host.receive(frame.dropFirst(2)))
         }
         #expect(try host.complete("q3").isEmpty)
         replies.append(try host.invalidate(.calendar))
+        replies.append(try host.complete("q4"))
         replies.append(try host.complete("q2"))
         replies.append(try host.complete("q1"))
         // Also split a host frame inside its header across pipe writes.
