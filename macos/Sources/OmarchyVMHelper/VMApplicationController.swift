@@ -14,6 +14,7 @@ final class VMApplicationController: NSObject, NSApplicationDelegate {
     private let portForwardingStore: PortForwardingPreferenceStore
     private let fullscreenPreferenceStore: FullscreenPreferenceStore
     private let storageLocationStore: StorageLocationPreferenceStore
+    private let omarchyLinkModeStore: OmarchyLinkServiceModePreferenceStore
     private let volumeProbe: VolumeProbing
     private let volumeRootDetector: VolumeRootDetecting
     private let deviceProvider: HostAudioDeviceProviding
@@ -24,6 +25,10 @@ final class VMApplicationController: NSObject, NSApplicationDelegate {
     /// The workspace the running VM is writing to, so an unmount of its volume
     /// can be recognized as the disk disappearing under QEMU.
     private var activeStateRoot: String?
+
+    /// One-run Service Mode choices for an ephemeral launch. Deliberately
+    /// in-memory: an ephemeral choice must never persist to a later launch.
+    private var ephemeralOmarchyLinkModes = OmarchyLinkServiceModes.allOff
 
     private var lifecycle = VMRunLifecycle()
     private var childRunning = false
@@ -49,6 +54,7 @@ final class VMApplicationController: NSObject, NSApplicationDelegate {
         portForwardingStore: PortForwardingPreferenceStore = PortForwardingPreferenceStore(),
         fullscreenPreferenceStore: FullscreenPreferenceStore = FullscreenPreferenceStore(),
         storageLocationStore: StorageLocationPreferenceStore = StorageLocationPreferenceStore(),
+        omarchyLinkModeStore: OmarchyLinkServiceModePreferenceStore = OmarchyLinkServiceModePreferenceStore(),
         volumeProbe: VolumeProbing = URLVolumeProbe(),
         volumeRootDetector: VolumeRootDetecting = FileManagerVolumeRootDetector(),
         deviceProvider: HostAudioDeviceProviding = CoreAudioHostAudioDeviceProvider(),
@@ -63,6 +69,7 @@ final class VMApplicationController: NSObject, NSApplicationDelegate {
         self.portForwardingStore = portForwardingStore
         self.fullscreenPreferenceStore = fullscreenPreferenceStore
         self.storageLocationStore = storageLocationStore
+        self.omarchyLinkModeStore = omarchyLinkModeStore
         self.volumeProbe = volumeProbe
         self.volumeRootDetector = volumeRootDetector
         self.deviceProvider = deviceProvider
@@ -159,6 +166,12 @@ final class VMApplicationController: NSObject, NSApplicationDelegate {
                     FullscreenPreferences(isImmersive: isImmersive)
                 )
             },
+            omarchyLinkStatus: { [weak self] in
+                self?.omarchyLinkMenuState()
+            },
+            setOmarchyLinkMode: { [weak self] service, mode in
+                self?.setOmarchyLinkMode(service, to: mode)
+            },
             launch: { [weak self] in
                 self?.startVirtualMachine()
             }
@@ -168,6 +181,64 @@ final class VMApplicationController: NSObject, NSApplicationDelegate {
         if initialResetRequested {
             startMenu.promptForReset()
         }
+    }
+
+    /// nil hides the Link row entirely; Omarchy Link has no release UI yet.
+    private func omarchyLinkMenuState() -> StartMenuOmarchyLinkMenuState? {
+        guard baseEnvironment["OMARCHY_LINK_DEVELOPMENT"] == "1" else { return nil }
+        switch omarchyLinkLaunchAccess() {
+        case .workspace(let identity):
+            return StartMenuOmarchyLinkMenuState(
+                availability: .workspace,
+                modes: omarchyLinkModeStore.load(for: identity)
+            )
+        case .ephemeral(let modes):
+            return StartMenuOmarchyLinkMenuState(availability: .ephemeral, modes: modes)
+        case .unavailable:
+            return StartMenuOmarchyLinkMenuState(availability: .unavailable, modes: .allOff)
+        }
+    }
+
+    private func setOmarchyLinkMode(
+        _ service: OmarchyLinkMacService,
+        to mode: OmarchyLinkServiceMode
+    ) {
+        switch omarchyLinkLaunchAccess() {
+        case .workspace(let identity):
+            omarchyLinkModeStore.save(
+                omarchyLinkModeStore.load(for: identity).updating(service, to: mode),
+                for: identity
+            )
+        case .ephemeral(let modes):
+            ephemeralOmarchyLinkModes = modes.updating(service, to: mode)
+        case .unavailable:
+            break
+        }
+    }
+
+    /// Read-only preflight of the launch's Service Mode key. The launch itself
+    /// captures one immutable snapshot through `OmarchyLinkServiceModePolicy`;
+    /// the shell re-validates the identity under its workspace lock.
+    private func omarchyLinkLaunchAccess() -> OmarchyLinkLaunchAccess {
+        if initialArguments.first == QEMUGPUStorageOption.ephemeral.rawValue {
+            return .ephemeral(ephemeralOmarchyLinkModes)
+        }
+        guard let storageKey = QEMUGPUStorageSpaceEstimate.storageKey(
+            environment: baseEnvironment,
+            bundleIdentity: bundledMetrics?.identity
+        ),
+            let root = QEMUGPUStorageSpaceEstimate.storageRootURL(
+                environment: baseEnvironment,
+                preference: storageLocationStore.load()
+            ),
+            let identity = WorkspaceStorage.linkWorkspaceIdentity(
+                directory: root
+                    .appendingPathComponent("disks", isDirectory: true)
+                    .appendingPathComponent(storageKey, isDirectory: true)
+                    .path
+            )
+        else { return .unavailable }
+        return .workspace(identity)
     }
 
     private func startVirtualMachine(allowBootRecovery: Bool = false) {

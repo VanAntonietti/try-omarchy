@@ -63,9 +63,19 @@ identity, atomically published with their disk state and replaced by Factory
 Reset. The launcher presents it as a non-secret kernel token; existing pre-Link
 disks are never retrofitted. Invalid identity state disables only Link, and the
 Workspace-bound host handshake refuses missing or mismatched identities before
-advertising Capabilities. Service Mode persistence and the actual broker/channel
-remain follow-up work. See [Workspace identity](../macos/README.md#omarchy-link-workspace-identity)
+advertising Capabilities. See [Workspace identity](../macos/README.md#omarchy-link-workspace-identity)
 for the host-state binding, crash recovery, and copy/relocation policy.
+
+Service Modes now persist on the host, keyed by that validated identity:
+Calendar, Messages, and Notes each default to Off for a new Workspace, and a
+development-gated start menu row (`OMARCHY_LINK_DEVELOPMENT=1`, hidden in
+released builds) cycles each service through Off, Read, and Read & Write while
+explaining that an enabled read exposes that service's private data to every
+process in the trusted Owner session. The modes are Try Omarchy choices, never
+Apple permission grants. Each Link Session receives one immutable snapshot of
+those modes captured at launch, so a later preference change cannot expand a
+running session; ephemeral launches take explicit one-run choices that are
+never persisted. The actual broker/channel remains follow-up work.
 
 A separate virtio-serial port (`dev.tryomarchy.camera`) carries fixed-size
 1280×720 NV12 frames from an AVFoundation bridge in the signed Mac helper. The
