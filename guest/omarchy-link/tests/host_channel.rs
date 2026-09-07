@@ -115,7 +115,12 @@ fn handshake_carries_the_workspace_identity_and_binds_the_session() {
         0,
         &["calendar.calendars.list", "calendar.events.list"],
     )]);
-    let state = negotiate_link_session(&mut channel, IDENTITY.to_owned()).unwrap();
+    let state = negotiate_link_session(
+        &mut channel,
+        IDENTITY.to_owned(),
+        "session-hello".to_owned(),
+    )
+    .unwrap();
 
     let hello = channel.sent_hello();
     assert_eq!(hello["method"], "session.hello");
@@ -142,7 +147,12 @@ fn a_newer_host_serves_this_client_through_additive_negotiation() {
         0,
         &["calendar.calendars.list", "future.operation.v9"],
     )]);
-    let state = negotiate_link_session(&mut channel, IDENTITY.to_owned()).unwrap();
+    let state = negotiate_link_session(
+        &mut channel,
+        IDENTITY.to_owned(),
+        "session-hello".to_owned(),
+    )
+    .unwrap();
     let GuestSessionState::Available(NegotiatedSession { capabilities, .. }) = state else {
         panic!("expected an available session");
     };
@@ -163,7 +173,12 @@ fn typed_host_failures_make_link_unavailable_with_their_reason() {
             "message": "Omarchy Link Workspace identity is missing or invalid",
         },
     })]);
-    let state = negotiate_link_session(&mut channel, IDENTITY.to_owned()).unwrap();
+    let state = negotiate_link_session(
+        &mut channel,
+        IDENTITY.to_owned(),
+        "session-hello".to_owned(),
+    )
+    .unwrap();
     let GuestSessionState::LinkUnavailable(failure) = state else {
         panic!("expected an unavailable session");
     };
@@ -174,7 +189,12 @@ fn typed_host_failures_make_link_unavailable_with_their_reason() {
 fn an_incompatible_protocol_response_is_a_typed_unavailability() {
     let mut channel =
         ScriptedChannel::replying(&[host_response("session-hello", 0, &[]).tap_set_major(2)]);
-    let state = negotiate_link_session(&mut channel, IDENTITY.to_owned()).unwrap();
+    let state = negotiate_link_session(
+        &mut channel,
+        IDENTITY.to_owned(),
+        "session-hello".to_owned(),
+    )
+    .unwrap();
     let GuestSessionState::LinkUnavailable(failure) = state else {
         panic!("expected an unavailable session");
     };
@@ -196,13 +216,17 @@ impl TapSetMajor for Value {
 fn channel_end_and_malformed_traffic_fail_without_a_session() {
     let mut closed = ScriptedChannel::replying(&[]);
     assert_eq!(
-        negotiate_link_session(&mut closed, IDENTITY.to_owned()),
+        negotiate_link_session(&mut closed, IDENTITY.to_owned(), "session-hello".to_owned()),
         Err(ChannelError::Closed)
     );
 
     let mut malformed = ScriptedChannel::raw(vec![0, 0, 0, 0]);
     assert_eq!(
-        negotiate_link_session(&mut malformed, IDENTITY.to_owned()),
+        negotiate_link_session(
+            &mut malformed,
+            IDENTITY.to_owned(),
+            "session-hello".to_owned()
+        ),
         Err(ChannelError::Protocol(ProtocolError::EmptyFrame))
     );
 }
@@ -234,8 +258,24 @@ fn owner_status_reports_the_negotiated_host_session() {
         .spawn()
         .unwrap();
 
-    // Serve the handshake as the host bridge would.
-    let (mut stream, _) = listener.accept().unwrap();
+    // Serve the handshake as the host bridge would, with bounded readiness
+    // so a daemon that never connects fails the test instead of hanging it.
+    listener.set_nonblocking(true).unwrap();
+    let mut accepted = None;
+    for _ in 0..200 {
+        match listener.accept() {
+            Ok((stream, _)) => {
+                accepted = Some(stream);
+                break;
+            }
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                thread::sleep(Duration::from_millis(50));
+            }
+            Err(error) => panic!("channel accept failed: {error}"),
+        }
+    }
+    let mut stream = accepted.expect("the daemon never connected to the channel");
+    stream.set_nonblocking(false).unwrap();
     stream
         .set_read_timeout(Some(Duration::from_secs(10)))
         .unwrap();
@@ -252,6 +292,11 @@ fn owner_status_reports_the_negotiated_host_session() {
     let hello = hello.unwrap();
     assert_eq!(hello["method"], "session.hello");
     assert_eq!(hello["params"]["workspaceIdentity"], IDENTITY);
+    let hello_id = hello["id"].as_str().unwrap();
+    assert!(
+        hello_id.starts_with("hello-"),
+        "hello identifiers must be unique per attempt, got {hello_id}"
+    );
     let response = host_response(
         hello["id"].as_str().unwrap(),
         0,
@@ -296,7 +341,12 @@ fn status_values_expose_typed_state_and_no_service_content() {
         0,
         &["calendar.calendars.list"],
     )]);
-    let available = negotiate_link_session(&mut channel, IDENTITY.to_owned()).unwrap();
+    let available = negotiate_link_session(
+        &mut channel,
+        IDENTITY.to_owned(),
+        "session-hello".to_owned(),
+    )
+    .unwrap();
     assert_eq!(
         channel_status_value(&available),
         json!({
@@ -312,7 +362,9 @@ fn status_values_expose_typed_state_and_no_service_content() {
         "id": "session-hello",
         "error": {"code": "session.unsupported_protocol", "message": "unsupported"},
     })]);
-    let unavailable = negotiate_link_session(&mut failed, IDENTITY.to_owned()).unwrap();
+    let unavailable =
+        negotiate_link_session(&mut failed, IDENTITY.to_owned(), "session-hello".to_owned())
+            .unwrap();
     assert_eq!(
         channel_status_value(&unavailable),
         json!({

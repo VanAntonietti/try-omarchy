@@ -148,12 +148,18 @@ fn channel_worker(link: Arc<Mutex<Option<GuestSessionState>>>, development: bool
     else {
         return;
     };
+    // Unique per attempt and per daemon process: the host remembers every
+    // request identifier for the whole Link Session, and a reused hello would
+    // escalate a retried handshake into a terminal protocol violation.
+    let mut attempt: u64 = 0;
     loop {
         let Ok(mut transport) = ChannelTransport::open(&device) else {
             thread::sleep(Duration::from_secs(5));
             continue;
         };
-        match negotiate_link_session(&mut transport, identity.clone()) {
+        attempt += 1;
+        let request_id = format!("hello-{}-{attempt}", std::process::id());
+        match negotiate_link_session(&mut transport, identity.clone(), request_id) {
             Ok(state) => {
                 let terminal = matches!(state, GuestSessionState::LinkUnavailable(_));
                 set_link_state(&link, state);

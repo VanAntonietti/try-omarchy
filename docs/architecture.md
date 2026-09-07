@@ -75,7 +75,23 @@ process in the trusted Owner session. The modes are Try Omarchy choices, never
 Apple permission grants. Each Link Session receives one immutable snapshot of
 those modes captured at launch, so a later preference change cannot expand a
 running session; ephemeral launches take explicit one-run choices that are
-never persisted. The actual broker/channel remains follow-up work.
+never persisted.
+
+The Link Session itself now travels over a private virtio-serial port
+(`dev.tryomarchy.link`) that the launcher attaches only when a persistent
+Workspace identity validated under the storage lock; ephemeral runs and
+legacy disks get no channel, and no host TCP listener, SSH dependency, or
+arbitrary command API is added. A supervised helper bridge verifies its QEMU
+target and private owned socket, then negotiates one session bound to the
+validated identity and the launch-frozen Service Mode snapshot. The guest
+broker reads the launcher-fixed kernel identity token, performs the
+handshake, and reports the negotiated Capabilities (or a typed failure)
+through its owner-only local status socket. Malformed traffic or an
+incompatible peer disables Link for the rest of the session with a
+content-free status; a crashed bridge restarts a bounded number of times;
+QEMU and the VM keep running in every case. Real Mac Service adapters remain
+follow-up work: every advertised operation currently answers with a typed
+unavailability, so no host data can cross the channel.
 
 A separate virtio-serial port (`dev.tryomarchy.camera`) carries fixed-size
 1280×720 NV12 frames from an AVFoundation bridge in the signed Mac helper. The

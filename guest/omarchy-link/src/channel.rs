@@ -61,12 +61,18 @@ fn is_canonical_workspace_identity(value: &str) -> bool {
 /// host settles the handshake or the channel ends. The returned state is
 /// terminal for this connection: available with negotiated Capabilities, or
 /// unavailable with a typed reason.
+///
+/// The caller supplies a request identifier that is unique per attempt: the
+/// host remembers every identifier for the whole Link Session, so a reused
+/// one would turn a retried handshake into a terminal protocol violation
+/// instead of the typed `session.handshake_already_complete` failure.
 pub fn negotiate_link_session(
     transport: &mut (impl Read + Write),
     workspace_identity: String,
+    request_id: String,
 ) -> Result<GuestSessionState, ChannelError> {
     let mut session = GuestSession::new(
-        "session-hello".to_owned(),
+        request_id,
         ClientIdentity {
             name: "omarchy-link".to_owned(),
             version: env!("CARGO_PKG_VERSION").to_owned(),
