@@ -113,11 +113,11 @@ struct OmarchyLinkChannelHostTests {
         #expect(error["code"] as? String == "session.unsupported_protocol")
     }
 
-    @Test("advertised operations answer with typed unavailability, never host data")
-    func advertisedMethodsAreUnavailable() throws {
+    @Test("operations without a served adapter answer with typed unavailability, never host data")
+    func unservedMethodsAreUnavailable() throws {
         var host = makeHost()
         _ = try host.receive(try hello())
-        for method in ["calendar.calendars.list", "calendar.events.create.propose", "host.shell"] {
+        for method in ["calendar.events.create.propose", "host.shell"] {
             let request = try frame([
                 "type": "request", "id": "r-\(method)", "method": method, "params": [:],
             ])
@@ -126,6 +126,14 @@ struct OmarchyLinkChannelHostTests {
             #expect(replies[0]["id"] as? String == "r-\(method)")
             #expect(error["code"] as? String == "request.method_unavailable")
         }
+        // Advertised Calendar Queries stay data-free when no adapter was
+        // injected for this Link Session.
+        let request = try frame([
+            "type": "request", "id": "r-cal", "method": "calendar.calendars.list", "params": [:],
+        ])
+        let replies = try decodeReplies(try host.receive(request))
+        let error = try #require(replies[0]["error"] as? [String: Any])
+        #expect(error["code"] as? String == "service.unavailable")
     }
 
     @Test("a second handshake cannot renegotiate the running Link Session")

@@ -1,5 +1,6 @@
 import AppKit
 import Darwin
+import EventKit
 import Foundation
 
 private var terminationSignalSources: [DispatchSourceSignal] = []
@@ -129,12 +130,21 @@ do {
         ) {
             fputs("[omarchy-link] \(warning)\n", stderr)
         }
+        // The EventKit adapter exists only when the launch-frozen Calendar
+        // mode and the Apple grant jointly allow Calendar Capabilities;
+        // otherwise no Calendar data source is reachable from this process.
+        let calendarProvider: (any OmarchyLinkCalendarProviding)? =
+            serviceModes.calendar != .off
+                && OmarchyLinkCalendarAccessPolicy.allowsCalendarCapabilities(calendarAuthorization)
+            ? EventKitOmarchyLinkCalendarAdapter(eventStore: EKEventStore())
+            : nil
         let bridge = try OmarchyLinkChannelBridge(
             targetPID: processIdentifier,
             socketPath: arguments[2],
             serviceModes: serviceModes,
             workspaceIdentity: workspaceIdentity,
-            calendarAuthorization: calendarAuthorization
+            calendarAuthorization: calendarAuthorization,
+            calendarProvider: calendarProvider
         )
         for signalNumber in [SIGINT, SIGTERM] {
             Darwin.signal(signalNumber, SIG_IGN)

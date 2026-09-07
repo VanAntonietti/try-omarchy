@@ -105,9 +105,11 @@ struct InventedOmarchyLinkCalendarAdapter: OmarchyLinkCalendarProviding {
     }
 }
 
-/// Compile-time proof of the eventual native boundary. This type is not
-/// instantiated by any production route in the Calendar spike and deliberately
-/// contains no permission-request API.
+/// The production Calendar boundary behind the Link channel bridge. It is
+/// instantiated only when the launch-frozen Calendar mode and the Apple grant
+/// jointly allow Calendar Capabilities, and it deliberately contains no
+/// permission-request API: reading through an unauthorized store never
+/// prompts.
 final class EventKitOmarchyLinkCalendarAdapter: OmarchyLinkCalendarProviding {
     private let eventStore: EKEventStore
 
