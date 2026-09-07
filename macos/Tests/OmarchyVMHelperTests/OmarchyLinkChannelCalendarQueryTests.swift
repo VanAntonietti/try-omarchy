@@ -33,7 +33,8 @@ struct OmarchyLinkChannelCalendarQueryTests {
 
     private func makeNegotiatedHost(
         adapter: (any OmarchyLinkCalendarProviding)?,
-        calendarMode: OmarchyLinkServiceMode = .read
+        calendarMode: OmarchyLinkServiceMode = .read,
+        requestIDPolicy: String = "legacy"
     ) throws -> OmarchyLinkChannelHost {
         var host = OmarchyLinkChannelHost(
             serviceModes: OmarchyLinkServiceModes(
@@ -49,6 +50,7 @@ struct OmarchyLinkChannelCalendarQueryTests {
                 "client": ["name": "omarchy-link", "version": "0.0.1"],
                 "protocol": ["major": 1, "minor": 0],
                 "workspaceIdentity": Self.identity.rawValue,
+                "requestIdPolicy": requestIDPolicy,
             ],
         ])
         _ = try host.receive(hello)
@@ -272,6 +274,51 @@ struct OmarchyLinkChannelCalendarQueryTests {
             "type": "request", "id": "q-next", "method": "calendar.calendars.list", "params": [:],
         ])
         #expect((next["error"] as? [String: Any])?["code"] as? String == "service.unavailable")
+    }
+
+    @Test("negotiated monotonic Query IDs permit long-lived agendas without permitting replay")
+    func longLivedAgenda() throws {
+        var host = try makeNegotiatedHost(
+            adapter: StubCalendarAdapter(), requestIDPolicy: "monotonic-q"
+        )
+        for index in 1...1030 {
+            let reply = try singleReply(from: &host, for: [
+                "type": "request", "id": "q\(index)",
+                "method": "calendar.calendars.list", "params": [:],
+            ])
+            #expect(reply["type"] as? String == "response")
+        }
+        #expect(throws: OmarchyLinkProtocolError.invalidMessage) {
+            _ = try host.receive(try frame([
+                "type": "request", "id": "q1", "method": "calendar.calendars.list", "params": [:],
+            ]))
+        }
+    }
+
+    @Test("an agenda exceeding the frame budget fails without disabling subsequent Queries")
+    func oversizedAgendaIsRecoverable() throws {
+        var adapter = StubCalendarAdapter()
+        adapter.stubbedEvents = (0..<128).map { index in
+            OmarchyLinkCalendarEvent(
+                id: "invented-\(index)", calendarID: "cal-work",
+                title: String(repeating: "x", count: 512),
+                startDate: date("2026-09-14T09:00:00Z"),
+                endDate: date("2026-09-14T10:00:00Z"), isAllDay: false
+            )
+        }
+        var host = try makeNegotiatedHost(adapter: adapter)
+        let reply = try singleReply(from: &host, for: [
+            "type": "request", "id": "large", "method": "calendar.events.list",
+            "params": ["start": "2026-09-14T00:00:00Z", "end": "2026-09-15T00:00:00Z",
+                       "calendarIds": [String]()],
+        ])
+        #expect(reply["type"] as? String == "error")
+        #expect((reply["error"] as? [String: Any])?["code"] as? String == "service.unavailable")
+        let next = try singleReply(from: &host, for: [
+            "type": "request", "id": "after-large", "method": "calendar.calendars.list",
+            "params": [:],
+        ])
+        #expect(next["type"] as? String == "response")
     }
 
     @Test("a Calendar Invalidation is a content-free event only when Calendar is advertised")

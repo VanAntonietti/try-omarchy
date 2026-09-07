@@ -22,7 +22,13 @@ calendars, screenshots, logs, or issue attachments as evidence.
 5. While the surface is open, add/change/remove invented events in macOS.
    Verify Invalidations refresh the agenda, with bursts coalesced (no faster
    than one refresh per two seconds). The sixty-second fallback handles a
-   date rollover even without an Invalidation.
+   date rollover even without an Invalidation. Leave the surface open overnight
+   and confirm fresh Queries still work the following day; new host/guest peers
+   negotiate monotonic IDs rather than exhausting the fixture request budget.
+   Automated invented-data tests also exercise more than 1,023 Queries.
+   If a dense agenda exceeds the local IPC budget, verify the surface reports
+   unavailability and a narrower calendar filter/date range remains queryable;
+   it must not silently truncate events or disable Link.
 6. Lock using the normal Omarchy lock action (Hyprlock). Verify the sensitive
    window closes within the bounded status/probe latency (normally under one
    second). Unlock: the window must not reopen. Explicitly reopen and verify

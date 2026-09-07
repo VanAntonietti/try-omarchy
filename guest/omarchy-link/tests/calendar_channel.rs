@@ -29,7 +29,19 @@ fn send(stream: &mut UnixStream, value: Value) {
 
 #[test]
 fn owner_queries_calendar_and_lock_blocks_content_without_logging_it() {
-    let root = std::path::PathBuf::from(format!("/tmp/link-calendar-{}", std::process::id()));
+    exercise_calendar_channel(false);
+}
+
+#[test]
+fn negotiated_agenda_remains_queryable_after_the_fixture_request_budget() {
+    exercise_calendar_channel(true);
+}
+
+fn exercise_calendar_channel(monotonic_ids: bool) {
+    let root = std::path::PathBuf::from(format!(
+        "/tmp/link-calendar-{}-{monotonic_ids}",
+        std::process::id()
+    ));
     fs::create_dir(&root).unwrap();
     fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
     fs::write(
@@ -62,10 +74,12 @@ fn owner_queries_calendar_and_lock_blocks_content_without_logging_it() {
         };
         host.set_nonblocking(false).unwrap();
         let hello = receive(&mut host);
-        send(
-            &mut host,
-            json!({"type":"response","id":hello["id"],"result":{"server":{"name":"invented","version":"1"},"protocol":{"major":1,"minor":0},"capabilities":["calendar.calendars.list","calendar.events.list"]}}),
-        );
+        let mut welcome = json!({"type":"response","id":hello["id"],"result":{"server":{"name":"invented","version":"1"},"protocol":{"major":1,"minor":0},"capabilities":["calendar.calendars.list","calendar.events.list"]}});
+        if monotonic_ids {
+            assert_eq!(hello["params"]["requestIdPolicy"], "monotonic-q");
+            welcome["result"]["requestIdPolicy"] = json!("monotonic-q");
+        }
+        send(&mut host, welcome);
         let call = |request: Value| {
             let mut s = UnixStream::connect(root.join("omarchy-link/socket")).unwrap();
             send(&mut s, request);
@@ -75,6 +89,20 @@ fn owner_queries_calendar_and_lock_blocks_content_without_logging_it() {
         while call(json!({"method":"status"}))["available"] != true {
             assert!(Instant::now() < deadline);
             thread::sleep(Duration::from_millis(10));
+        }
+        if monotonic_ids {
+            for index in 1..=1030 {
+                thread::scope(|scope| {
+                    let query = scope.spawn(|| call(json!({"method":"calendar.calendars.list"})));
+                    let request = receive(&mut host);
+                    assert_eq!(request["id"], format!("q{index}"));
+                    send(
+                        &mut host,
+                        json!({"type":"response","id":request["id"],"result":{"calendars":[]}}),
+                    );
+                    assert_eq!(query.join().unwrap(), json!({"calendars":[]}));
+                });
+            }
         }
         thread::scope(|scope| {
             let query = scope.spawn(|| call(json!({"method":"calendar.calendars.list"})));

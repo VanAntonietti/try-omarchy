@@ -16,6 +16,7 @@ struct OmarchyLinkChannelHost {
     private let calendarProvider: (any OmarchyLinkCalendarProviding)?
     private var decoder = OmarchyLinkFrameDecoder()
     private var requestIDs = Set<String>()
+    private var lastMonotonicQueryID: UInt32?
     private var closed = false
 
     /// nil means no Calendar adapter is reachable for this Link Session; any
@@ -66,12 +67,32 @@ struct OmarchyLinkChannelHost {
             // unknown or completed work is the protocol's documented no-op.
             return Data()
         }
-        guard !requestIDs.contains(id) else { throw OmarchyLinkProtocolError.invalidMessage }
-        guard requestIDs.count < 1024 else { throw OmarchyLinkProtocolError.resourceLimit }
-        requestIDs.insert(id)
+        if let last = lastMonotonicQueryID {
+            guard id.first == "q", let number = UInt32(id.dropFirst()),
+                  id == "q\(number)", number > last, !requestIDs.contains(id) else {
+                throw OmarchyLinkProtocolError.invalidMessage
+            }
+            lastMonotonicQueryID = number
+        } else {
+            guard !requestIDs.contains(id) else { throw OmarchyLinkProtocolError.invalidMessage }
+            guard requestIDs.count < 1024 else { throw OmarchyLinkProtocolError.resourceLimit }
+            requestIDs.insert(id)
+        }
 
         guard case .available = session.status else {
-            return try OmarchyLinkFrameCodec.encodePayload(session.receive(payload).encodedMessage())
+            let reply = try session.receive(payload).encodedMessage()
+            if case .available = session.status,
+               (envelope["params"] as? [String: Any])?["requestIdPolicy"] as? String == "monotonic-q" {
+                // Opt-in only: older clients retain the existing arbitrary-ID
+                // contract. A high-water mark replaces session-long ID storage.
+                lastMonotonicQueryID = 0
+                var response = try OmarchyLinkFrameCodec.decodeJSONObject(reply)
+                var result = response["result"] as? [String: Any] ?? [:]
+                result["requestIdPolicy"] = "monotonic-q"
+                response["result"] = result
+                return try OmarchyLinkFrameCodec.encodeJSONObject(response)
+            }
+            return try OmarchyLinkFrameCodec.encodePayload(reply)
         }
         guard let method = envelope["method"] as? String, !method.isEmpty,
               envelope["params"] is [String: Any] else {
@@ -93,9 +114,7 @@ struct OmarchyLinkChannelHost {
                   ) else {
                 return try serviceUnavailable(id)
             }
-            return try OmarchyLinkFrameCodec.encodeJSONObject([
-                "type": "response", "id": id, "result": ["calendars": calendars],
-            ])
+            return try calendarResponse(id, result: ["calendars": calendars])
         }
         if method == OmarchyLinkCapability.calendarEventList.rawValue,
            negotiated.capabilities.contains(.calendarEventList) {
@@ -112,9 +131,7 @@ struct OmarchyLinkChannelHost {
                   ) else {
                 return try serviceUnavailable(id)
             }
-            return try OmarchyLinkFrameCodec.encodeJSONObject([
-                "type": "response", "id": id, "result": ["events": events],
-            ])
+            return try calendarResponse(id, result: ["events": events])
         }
         return try OmarchyLinkFrameCodec.encodeJSONObject([
             "type": "error", "id": id,
@@ -123,6 +140,17 @@ struct OmarchyLinkChannelHost {
                 "message": "The Capability is not available",
             ],
         ])
+    }
+
+    private func calendarResponse(_ id: String, result: [String: Any]) throws -> Data {
+        let frame = try OmarchyLinkFrameCodec.encodeJSONObject([
+            "type": "response", "id": id, "result": result,
+        ])
+        // The Owner-local IPC budget is smaller than the host wire budget.
+        // Budget the entire envelope conservatively; never truncate an agenda
+        // or let a valid, dense Calendar response close the sensitive surface.
+        guard frame.count <= 65536 else { return try serviceUnavailable(id) }
+        return frame
     }
 
     private func serviceUnavailable(_ id: String) throws -> Data {

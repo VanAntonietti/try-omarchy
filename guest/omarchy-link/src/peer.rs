@@ -118,6 +118,8 @@ pub struct GuestPeer {
     decoder: FrameDecoder,
     pending: HashMap<String, PendingQuery>,
     next_id: u32,
+    request_monotonic_ids: bool,
+    request_id_limit: u32,
     closed: bool,
     hello_sent: bool,
 }
@@ -142,6 +144,8 @@ impl GuestPeer {
             decoder: FrameDecoder::default(),
             pending: HashMap::new(),
             next_id: 1,
+            request_monotonic_ids: false,
+            request_id_limit: 1024,
             closed: false,
             hello_sent: false,
         }
@@ -159,6 +163,7 @@ impl GuestPeer {
             ProtocolVersion { major: 1, minor: 0 },
         )
         .with_workspace_identity(identity);
+        peer.request_monotonic_ids = true;
         peer
     }
 
@@ -170,7 +175,11 @@ impl GuestPeer {
             return Err(ProtocolError::InvalidMessage);
         }
         self.hello_sent = true;
-        encode_json(&self.session.hello_request())
+        let mut hello = self.session.hello_request();
+        if self.request_monotonic_ids {
+            hello["params"]["requestIdPolicy"] = json!("monotonic-q");
+        }
+        encode_json(&hello)
     }
 
     pub fn list_calendars(&mut self) -> Result<(String, Vec<u8>), ProtocolError> {
@@ -187,7 +196,7 @@ impl GuestPeer {
         {
             return Err(ProtocolError::CapabilityUnavailable);
         }
-        if self.pending.len() >= 32 || self.next_id >= 1024 {
+        if self.pending.len() >= 32 || self.next_id >= self.request_id_limit {
             return Err(ProtocolError::ResourceLimit);
         }
         let id = format!("q{}", self.next_id);
@@ -234,7 +243,7 @@ impl GuestPeer {
         {
             return Err(ProtocolError::InvalidMessage);
         }
-        if self.pending.len() >= 32 || self.next_id >= 1024 {
+        if self.pending.len() >= 32 || self.next_id >= self.request_id_limit {
             return Err(ProtocolError::ResourceLimit);
         }
         let id = format!("q{}", self.next_id);
@@ -282,7 +291,7 @@ impl GuestPeer {
         {
             return Err(ProtocolError::InvalidMessage);
         }
-        if self.pending.len() >= 32 || self.next_id >= 1024 {
+        if self.pending.len() >= 32 || self.next_id >= self.request_id_limit {
             return Err(ProtocolError::ResourceLimit);
         }
         let id = format!("q{}", self.next_id);
@@ -351,6 +360,11 @@ impl GuestPeer {
             if self.session.state() == &GuestSessionState::AwaitingHandshake {
                 match self.session.accept_handshake(&value) {
                     GuestSessionState::Available(session) => {
+                        if self.request_monotonic_ids
+                            && value["result"]["requestIdPolicy"] == "monotonic-q"
+                        {
+                            self.request_id_limit = u32::MAX;
+                        }
                         messages.push(PeerMessage::Ready(session.clone()))
                     }
                     GuestSessionState::LinkUnavailable(failure) => {
