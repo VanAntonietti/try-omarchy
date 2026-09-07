@@ -24,7 +24,7 @@ Local IPC is one length-prefixed JSON request/response per connection, bounded t
 
 For an isolated invented-data socket demo, use a fresh 0700 `XDG_RUNTIME_DIR` and run `OMARCHY_LINK_DEVELOPMENT=1 omarchy-link daemon --development-fake`. From the same runtime directory, `status` identifies the invented adapter without claiming host availability. Submit `{"method":"calendar.agenda","date":"2026-09-14","range":"seven-days"}` on `call` stdin. The fake adapter cannot be enabled by a client request.
 
-Manual Linux verification: in a disposable new Workspace, confirm the Owner service starts, then attempt socket status and proposal requests from a second account; both must fail before reaching the broker. Stop/start the Owner service and verify status works again. No personal Apple data is needed.
+Disposable-Linux verification: confirm the Owner service starts, then attempt socket status and proposal requests from a second account; both must fail before reaching the broker. Stop/start the Owner service and verify status works again. No personal Apple data is needed. `scripts/verify-owner-broker-lima.sh` automates these checks in a throwaway Lima VM on the hosting Mac: it builds the locked, vendored sources with `cargo build --frozen --release`, installs the factory `omarchy-link.service` unit unchanged, and exercises the Owner and a second account (client refusal, kernel `EACCES` on a raw connect, daemon refusal for non-Owner uids, and a clean stop/start cycle). The same steps remain valid manually in a disposable new Workspace.
 
 ## Development Calendar surface
 
