@@ -77,7 +77,7 @@ class OmarchyLinkCalendarDemoTests(unittest.TestCase):
                 "-n -p /usr/share/try-omarchy/development/omarchy-link-calendar",
             )
 
-    def test_native_adapter_has_no_permission_or_production_launch_route(self) -> None:
+    def test_native_adapter_and_bridge_never_request_permission(self) -> None:
         adapter = (
             REPOSITORY
             / "macos/Sources/OmarchyVMHelper/OmarchyLinkCalendarAdapter.swift"
@@ -90,7 +90,8 @@ class OmarchyLinkCalendarDemoTests(unittest.TestCase):
         self.assertIn("EventKitOmarchyLinkCalendarAdapter", adapter)
         self.assertNotIn("requestFullAccessToEvents", adapter)
         self.assertNotIn("requestAccess", adapter)
-        self.assertNotIn("EventKitOmarchyLinkCalendarAdapter", helper_main)
+        # Production Queries now route to EventKit (#11); permission prompting
+        # still belongs exclusively to the visible Mac start-menu surface.
 
         # The grant-status ticket added exactly one permission surface: the
         # declared full-access usage description and the visible start-menu

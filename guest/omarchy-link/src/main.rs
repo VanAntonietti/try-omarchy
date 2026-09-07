@@ -1,3 +1,4 @@
+mod content_access;
 mod local;
 
 use omarchy_link::{

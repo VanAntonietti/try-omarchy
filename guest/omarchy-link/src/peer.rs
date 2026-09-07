@@ -6,13 +6,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct Calendar {
     pub id: String,
     pub title: String,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CalendarEvent {
     pub id: String,
@@ -145,6 +145,21 @@ impl GuestPeer {
             closed: false,
             hello_sent: false,
         }
+    }
+
+    /// Creates the peer for a launcher-validated Workspace and unique handshake attempt.
+    pub fn for_workspace(identity: String, attempt: String) -> Self {
+        let mut peer = Self::new();
+        peer.session = GuestSession::new(
+            format!("hello-{attempt}"),
+            ClientIdentity {
+                name: "omarchy-link".into(),
+                version: env!("CARGO_PKG_VERSION").into(),
+            },
+            ProtocolVersion { major: 1, minor: 0 },
+        )
+        .with_workspace_identity(identity);
+        peer
     }
 
     pub fn hello_frame(&mut self) -> Result<Vec<u8>, ProtocolError> {

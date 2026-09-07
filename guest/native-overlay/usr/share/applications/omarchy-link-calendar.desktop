@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Omarchy Link Calendar
+Comment=Browse Calendar from the hosting Mac
+Exec=/usr/local/bin/omarchy-link-calendar
+Icon=office-calendar
+Terminal=false
+Categories=Office;Calendar;

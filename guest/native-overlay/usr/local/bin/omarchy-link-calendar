@@ -1,0 +1,7 @@
+#!/bin/bash
+set -euo pipefail
+[[ $# == 0 && -n ${WAYLAND_DISPLAY:-} ]] || exit 69
+# Content travels only over private pipes; never into launcher/session logs.
+ulimit -c 0
+export PYTHONDONTWRITEBYTECODE=1
+exec quickshell -n -p /usr/share/try-omarchy/omarchy-link-calendar >/dev/null 2>&1
