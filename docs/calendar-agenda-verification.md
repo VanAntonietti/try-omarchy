@@ -27,7 +27,8 @@ calendars, screenshots, logs, or issue attachments as evidence.
    negotiate monotonic IDs rather than exhausting the fixture request budget.
    Automated invented-data tests also exercise more than 1,023 Queries.
    If a dense agenda exceeds the local IPC budget, verify the surface reports
-   unavailability and a narrower calendar filter/date range remains queryable;
+   unavailability with no stale events while retaining the calendar choices.
+   Select a narrower calendar filter/date range and confirm it remains queryable;
    it must not silently truncate events or disable Link.
 6. Lock using the normal Omarchy lock action (Hyprlock). Verify the sensitive
    window closes within the bounded status/probe latency (normally under one
@@ -48,5 +49,7 @@ Automated evidence: Rust Owner-local IPC/fake-host tests cover correlated
 Queries, exact UTC bounds and filters, lock-before/lock-during-query refusal,
 content-free Invalidations, disconnect failure, and quiet logs. Python tests
 exercise the deterministic model and the actual private-pipe driver with an
-invented broker. Quickshell rendering, real logind/Hyprlock behavior, and real
+invented broker, including narrowing an unavailable agenda using retained
+calendar choices and clearing content on lock. Quickshell rendering, real
+logind/Hyprlock behavior, and real
 EventKit Invalidations require the manual run above.

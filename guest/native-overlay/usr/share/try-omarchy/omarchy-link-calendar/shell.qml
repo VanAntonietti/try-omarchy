@@ -25,7 +25,7 @@ ShellRoot {
     try {
       var value = JSON.parse(data)
       if (value.closed) { root.clearAndClose(); return }
-      root.snapshot = value.error ? ({calendars: [], events: []}) : value
+      root.snapshot = {calendars: value.calendars || [], events: value.error ? [] : (value.events || [])}
       root.failure = value.error || ""
     } catch (_) { root.clearAndClose() }
   }

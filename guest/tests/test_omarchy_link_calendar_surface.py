@@ -51,6 +51,12 @@ class CalendarSurfaceTests(unittest.TestCase):
         self.assertEqual([e['title'] for e in model.snapshot['events']], ['Shown'])
 
     def test_private_bridge_stream_exits_on_lock_without_late_content(self):
+        self.exercise_bridge(dense_agenda=False)
+
+    def test_unavailable_agenda_keeps_filters_for_recovery_then_clears_on_lock(self):
+        self.exercise_bridge(dense_agenda=True)
+
+    def exercise_bridge(self, dense_agenda):
         import json
         import os
         import socket
@@ -82,6 +88,8 @@ class CalendarSurfaceTests(unittest.TestCase):
                             response = {'contentAllowed': not locked.is_set(), 'hostAvailable': True, 'calendarRevision': 0}
                         elif request['method'] == 'calendar.calendars.list':
                             response = {'calendars': [{'id': 'a', 'title': 'Invented calendar'}]}
+                        elif dense_agenda and not request.get('calendarIds'):
+                            response = {'error': 'unavailable'}
                         else:
                             response = {'events': [{'calendarId': 'a', 'title': 'Invented private event'}]}
                         body = json.dumps(response).encode()
@@ -97,6 +105,18 @@ class CalendarSurfaceTests(unittest.TestCase):
                 import select
                 self.assertTrue(select.select([process.stdout], [], [], 5)[0])
                 snapshot = json.loads(process.stdout.readline())
+                if dense_agenda:
+                    self.assertEqual(snapshot.get('calendars'), [{'id': 'a', 'title': 'Invented calendar'}])
+                    self.assertEqual(snapshot['events'], [])
+                    self.assertEqual(snapshot['error'], 'Calendar unavailable')
+                    process.stdin.write(json.dumps({'range': 'today', 'calendar': 'a'}) + '\n')
+                    process.stdin.flush()
+                    self.assertTrue(select.select([process.stdout], [], [], 5)[0])
+                    cleared = json.loads(process.stdout.readline())
+                    self.assertEqual(cleared['events'], [])
+                    self.assertTrue(select.select([process.stdout], [], [], 5)[0])
+                    snapshot = json.loads(process.stdout.readline())
+                    self.assertNotIn('error', snapshot)
                 self.assertEqual(snapshot['events'][0]['title'], 'Invented private event')
                 locked.set()
                 output, errors = process.communicate(timeout=5)
@@ -106,6 +126,8 @@ class CalendarSurfaceTests(unittest.TestCase):
             finally:
                 process.kill() if process.poll() is None else None
                 process.wait()
+                for pipe in (process.stdin, process.stdout, process.stderr):
+                    pipe.close()
                 stopped.set()
                 server.join(timeout=3)
                 listener.close()

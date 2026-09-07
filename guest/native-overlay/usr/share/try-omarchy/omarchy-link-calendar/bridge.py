@@ -65,9 +65,12 @@ def selections(commands):
 def fetch(request):
     calendars = call({'method': 'calendar.calendars.list'})
     events = call(request)
-    if 'error' in calendars or 'error' in events:
+    if 'error' in calendars:
         raise ValueError('unavailable')
-    return calendars['calendars'], events['events']
+    # A bounded agenda can be unavailable while its calendar choices remain
+    # usable. Keep those choices so the Owner can narrow the Query.
+    unavailable = 'error' in events
+    return calendars['calendars'], [] if unavailable else events['events'], unavailable
 
 
 def run():
@@ -98,8 +101,11 @@ def run():
             pass
         if pending is not None and pending.done():
             try:
-                calendars, events = pending.result()
+                calendars, events, unavailable = pending.result()
                 if model.accept(generation, calendars, events):
+                    if unavailable:
+                        model.snapshot['error'] = 'Calendar unavailable'
+                        model.dirty = True
                     emit(model.snapshot)
             except Exception:
                 model.snapshot = {'calendars': [], 'events': []}
