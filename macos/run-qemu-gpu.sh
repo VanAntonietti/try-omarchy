@@ -1174,6 +1174,7 @@ qmp_socket="/tmp/${work_dir##*/}/qmp.sock"
 audio_bridge_socket="/tmp/${work_dir##*/}/audio.sock"
 camera_bridge_socket="/tmp/${work_dir##*/}/camera.sock"
 clipboard_bridge_socket="/tmp/${work_dir##*/}/clipboard.sock"
+link_bridge_socket="/tmp/${work_dir##*/}/link.sock"
 audio_route_dir="/tmp/${work_dir##*/}/audio-routes"
 mkdir -m 700 "$work_dir/audio-routes"
 
@@ -1258,6 +1259,28 @@ if ((reset_only)); then
   exit 0
 fi
 
+# Omarchy Link's private channel exists only for a launch whose Workspace
+# identity validated under the storage lock; ephemeral runs and legacy disks
+# have no identity to bind, so nothing may be exposed. The Service Mode
+# snapshot is captured exactly once here: a later preference change cannot
+# expand this Link Session. Any capture failure only disables Link.
+link_channel_enabled=0
+link_calendar_mode=''
+link_messages_mode=''
+link_notes_mode=''
+link_mode_snapshot_pattern='^calendar=(off|read|readWrite) messages=(off|read|readWrite) notes=(off|read|readWrite)$'
+if [[ $QEMU_SELECTED_STORAGE_MODE == persistent && -n ${QEMU_LINK_WORKSPACE_IDENTITY:-} ]]; then
+  if link_mode_snapshot=$("$native_bridge" --link-session-modes "$QEMU_LINK_WORKSPACE_IDENTITY") && \
+    [[ $link_mode_snapshot =~ $link_mode_snapshot_pattern ]]; then
+    link_calendar_mode=${BASH_REMATCH[1]}
+    link_messages_mode=${BASH_REMATCH[2]}
+    link_notes_mode=${BASH_REMATCH[3]}
+    link_channel_enabled=1
+  else
+    echo '[qemu-gpu] Omarchy Link is unavailable: the Service Mode snapshot could not be captured' >&2
+  fi
+fi
+
 case ${OMARCHY_QEMU_GPU_IMMERSIVE:-1} in
   1)
     cocoa_full_screen=on
@@ -1317,6 +1340,15 @@ qemu_args=(
   -device 'virtserialport,bus=omarchy-serial.0,nr=4,chardev=omarchy-camera-bridge,name=dev.tryomarchy.camera'
 )
 
+if (( link_channel_enabled )); then
+  # No host TCP listener, SSH dependency, or arbitrary command API: the Link
+  # Session travels only over this private multiplexed virtio-serial port.
+  qemu_args+=(
+    -chardev "socket,id=omarchy-link-bridge,path=$link_bridge_socket,server=on,wait=off"
+    -device 'virtserialport,bus=omarchy-serial.0,nr=5,chardev=omarchy-link-bridge,name=dev.tryomarchy.link'
+  )
+fi
+
 if [[ -n $shared_folder ]]; then
   # security_model=none performs every host operation as this Mac user and
   # ignores guest chown requests, so the Mac keeps real modes and ownership.
@@ -1349,6 +1381,13 @@ if [[ ${OMARCHY_QEMU_GPU_DRY_RUN:-0} == 1 ]]; then
     "$native_bridge" "$clipboard_bridge_socket" >&2
   printf '\n[qemu-gpu] camera bridge command: %q --bridge-native-camera QEMU_PID %q' \
     "$native_bridge" "$camera_bridge_socket" >&2
+  if (( link_channel_enabled )); then
+    printf '\n[qemu-gpu] omarchy link bridge command: %q --bridge-omarchy-link QEMU_PID %q %q %q %q %q' \
+      "$native_bridge" "$link_bridge_socket" "$QEMU_LINK_WORKSPACE_IDENTITY" \
+      "$link_calendar_mode" "$link_messages_mode" "$link_notes_mode" >&2
+  else
+    printf '\n[qemu-gpu] omarchy link: disabled' >&2
+  fi
   if [[ -n $shared_folder ]]; then
     printf '\n[qemu-gpu] shared folder: %q' "$shared_folder" >&2
   else
@@ -1378,7 +1417,8 @@ printf '%s\n' "$qemu_pid" >"$work_dir/.qemu.pid"
 chmod 600 "$work_dir/.qemu.pid"
 
 for ((attempt = 0; attempt < 100; attempt++)); do
-  if [[ -S $qmp_socket && -S $audio_bridge_socket && -S $camera_bridge_socket && -S $clipboard_bridge_socket ]]; then
+  if [[ -S $qmp_socket && -S $audio_bridge_socket && -S $camera_bridge_socket && -S $clipboard_bridge_socket ]] \
+    && { (( ! link_channel_enabled )) || [[ -S $link_bridge_socket ]]; }; then
     break
   fi
   kill -0 "$qemu_pid" 2>/dev/null || fail "QEMU exited before creating its private QMP socket"
@@ -1388,6 +1428,9 @@ done
 [[ -S $audio_bridge_socket ]] || fail "QEMU did not create its private audio bridge socket"
 [[ -S $camera_bridge_socket ]] || fail "QEMU did not create its private camera bridge socket"
 [[ -S $clipboard_bridge_socket ]] || fail "QEMU did not create its private clipboard bridge socket"
+if (( link_channel_enabled )) && [[ ! -S $link_bridge_socket ]]; then
+  fail "QEMU did not create its private Omarchy Link bridge socket"
+fi
 echo "[qemu-gpu] Ready." >&2
 
 # FD 9 deliberately remains open only in QEMU. Letting the sibling audio
@@ -1411,6 +1454,18 @@ start_camera_bridge() {
 }
 start_camera_bridge
 camera_bridge_restarts=0
+
+link_bridge_pid=''
+start_link_bridge() {
+  "$native_bridge" --bridge-omarchy-link \
+    "$qemu_pid" "$link_bridge_socket" "$QEMU_LINK_WORKSPACE_IDENTITY" \
+    "$link_calendar_mode" "$link_messages_mode" "$link_notes_mode" 9>&- &
+  link_bridge_pid=$!
+}
+if (( link_channel_enabled )); then
+  start_link_bridge
+fi
+link_bridge_restarts=0
 
 # Bash 3.2 has no `wait -n`. The native-audio bridge is required for the guest
 # transport, so watch it alongside QEMU and fail if it exits unexpectedly.
@@ -1447,6 +1502,30 @@ while true; do
         start_clipboard_bridge
       else
         echo "[qemu-gpu] clipboard sharing is unavailable for the rest of this session" >&2
+      fi
+    fi
+  fi
+  # Omarchy Link is optional and must stay isolated from VM availability. A
+  # crashed bridge restarts a few times; a protocol violation or incompatible
+  # peer disables Link for the rest of this session while QEMU keeps running.
+  if [[ $link_bridge_pid =~ ^[0-9]+$ ]]; then
+    link_bridge_state=$(ps -p "$link_bridge_pid" -o state= 2>/dev/null || true)
+    if [[ -z $link_bridge_state || $link_bridge_state == *Z* ]]; then
+      if wait "$link_bridge_pid"; then
+        link_bridge_status=0
+      else
+        link_bridge_status=$?
+      fi
+      link_bridge_pid=""
+      if (( link_bridge_status == 2 )); then
+        echo "[qemu-gpu] Omarchy Link is disabled for the rest of this session" >&2
+      elif (( link_bridge_restarts < 5 )); then
+        link_bridge_restarts=$((link_bridge_restarts + 1))
+        echo "[qemu-gpu] Omarchy Link bridge exited (status $link_bridge_status); restarting ($link_bridge_restarts/5)" >&2
+        sleep 1
+        start_link_bridge
+      else
+        echo "[qemu-gpu] Omarchy Link is unavailable for the rest of this session" >&2
       fi
     fi
   fi
@@ -1501,4 +1580,8 @@ if [[ $camera_bridge_pid =~ ^[0-9]+$ ]]; then
   terminate_child "$camera_bridge_pid" 20
 fi
 camera_bridge_pid=""
+if [[ $link_bridge_pid =~ ^[0-9]+$ ]]; then
+  terminate_child "$link_bridge_pid" 20
+fi
+link_bridge_pid=""
 exit "$qemu_status"

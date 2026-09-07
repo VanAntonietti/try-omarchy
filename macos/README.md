@@ -68,8 +68,11 @@ New persistent Workspaces also receive a random, lowercase UUIDv4, distinct
 from the factory digest and storage path. It is the key for per-Workspace
 Service Modes, not a secret or an Apple permission grant. Factory Reset creates
 a different identity even with the same factory and folder; old identity-keyed
-choices must not be carried forward. The live Link channel is separate
-follow-up work (#9).
+choices must not be carried forward. The live Link channel binds this
+identity: the launcher passes it to the supervised `--bridge-omarchy-link`
+helper together with the one-time Service Mode snapshot printed by
+`--link-session-modes`, and the guest handshake must present the same value
+before any Capability is advertised.
 
 ### Omarchy Link Service Modes
 
