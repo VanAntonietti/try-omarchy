@@ -127,18 +127,32 @@ struct OmarchyLinkHostSession {
     }
 
     private let serviceModes: OmarchyLinkServiceModes
+    private let calendarAuthorization: OmarchyLinkCalendarAuthorizationState
     private let identityPolicy: IdentityPolicy
     private(set) var status = OmarchyLinkHostSessionStatus.awaitingHandshake
 
     /// nil means the host could not validate Workspace state, not an opt-out.
-    init(serviceModes: OmarchyLinkServiceModes, workspaceIdentity: OmarchyLinkWorkspaceIdentity?) {
+    /// The Apple Calendar grant is captured once at launch and can only narrow
+    /// what the Calendar Service Mode advertises.
+    init(
+        serviceModes: OmarchyLinkServiceModes,
+        workspaceIdentity: OmarchyLinkWorkspaceIdentity?,
+        calendarAuthorization: OmarchyLinkCalendarAuthorizationState
+    ) {
         self.serviceModes = serviceModes
+        self.calendarAuthorization = calendarAuthorization
         identityPolicy = .workspace(workspaceIdentity)
     }
 
     /// Invented-data fixtures predate Workspace identity and have no VM access.
-    init(developmentServiceModes: OmarchyLinkServiceModes) {
+    /// They behave as if Apple granted access by default because nothing here
+    /// touches real Calendar data.
+    init(
+        developmentServiceModes: OmarchyLinkServiceModes,
+        calendarAuthorization: OmarchyLinkCalendarAuthorizationState = .authorized
+    ) {
         serviceModes = developmentServiceModes
+        self.calendarAuthorization = calendarAuthorization
         identityPolicy = .developmentFixture
     }
 
@@ -205,7 +219,10 @@ struct OmarchyLinkHostSession {
                     OmarchyLinkProtocolVersion.current.minor
                 )
             ),
-            capabilities: Self.capabilities(allowedBy: serviceModes)
+            capabilities: Self.capabilities(
+                allowedBy: serviceModes,
+                calendarAuthorization: calendarAuthorization
+            )
         )
         status = .available(negotiated)
         return OmarchyLinkHostReply(
@@ -235,15 +252,22 @@ struct OmarchyLinkHostSession {
     }
 
     private static func capabilities(
-        allowedBy modes: OmarchyLinkServiceModes
+        allowedBy modes: OmarchyLinkServiceModes,
+        calendarAuthorization: OmarchyLinkCalendarAuthorizationState
     ) -> [OmarchyLinkCapability] {
         var capabilities: [OmarchyLinkCapability] = []
 
-        if modes.calendar != .off {
+        // Calendar Capabilities require both the host user's Service Mode and
+        // the Apple grant. Off advertises nothing even with a grant, and a
+        // grant never widens a mode. A blocked grant leaves the other Mac
+        // Services and the VM untouched.
+        let calendarAccessible =
+            OmarchyLinkCalendarAccessPolicy.allowsCalendarCapabilities(calendarAuthorization)
+        if modes.calendar != .off, calendarAccessible {
             capabilities += [.calendarList, .calendarEventList]
-        }
-        if modes.calendar == .readWrite {
-            capabilities.append(.calendarEventCreateProposal)
+            if modes.calendar == .readWrite {
+                capabilities.append(.calendarEventCreateProposal)
+            }
         }
         if modes.messages != .off {
             capabilities += [.messageConversationList, .messageThreadList, .messageUnreadGet]

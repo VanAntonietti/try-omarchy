@@ -91,7 +91,19 @@ class OmarchyLinkCalendarDemoTests(unittest.TestCase):
         self.assertNotIn("requestFullAccessToEvents", adapter)
         self.assertNotIn("requestAccess", adapter)
         self.assertNotIn("EventKitOmarchyLinkCalendarAdapter", helper_main)
-        self.assertNotIn("NSCalendars", info)
+
+        # The grant-status ticket added exactly one permission surface: the
+        # declared full-access usage description and the visible start-menu
+        # request in OmarchyLinkCalendarAccess. The bridge and adapter still
+        # only read status and never prompt.
+        access = (
+            REPOSITORY
+            / "macos/Sources/OmarchyVMHelper/OmarchyLinkCalendarAccess.swift"
+        ).read_text(encoding="utf-8")
+        self.assertIn("NSCalendarsFullAccessUsageDescription", info)
+        self.assertNotIn("NSCalendarsWriteOnlyAccessUsageDescription", info)
+        self.assertIn("requestFullAccessToEvents", access)
+        self.assertNotIn("requestFullAccessToEvents", helper_main)
 
     def test_factory_build_installs_the_offline_broker_without_enabling_ui(self) -> None:
         build = (GUEST / "build.sh").read_text(encoding="utf-8")

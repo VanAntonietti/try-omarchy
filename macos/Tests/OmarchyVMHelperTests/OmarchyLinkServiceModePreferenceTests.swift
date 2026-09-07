@@ -153,7 +153,8 @@ struct OmarchyLinkSessionModeSnapshotTests {
         )
         var session = OmarchyLinkHostSession(
             serviceModes: snapshot,
-            workspaceIdentity: workspace
+            workspaceIdentity: workspace,
+            calendarAuthorization: .authorized
         )
 
         fixture.store.save(

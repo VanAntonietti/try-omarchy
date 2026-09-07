@@ -205,6 +205,7 @@ final class StartMenuWindow: NSObject, NSWindowDelegate {
     private let setImmersiveMode: (Bool) -> Void
     private let omarchyLinkStatus: () -> StartMenuOmarchyLinkMenuState?
     private let setOmarchyLinkMode: (OmarchyLinkMacService, OmarchyLinkServiceMode) -> Void
+    private let requestOmarchyLinkCalendarAccess: (@escaping (Bool) -> Void) -> Void
     private let launch: () -> Void
     private let canResetStorage: Bool
     private let storageLocation: () -> String?
@@ -287,6 +288,9 @@ final class StartMenuWindow: NSObject, NSWindowDelegate {
         setImmersiveMode: @escaping (Bool) -> Void = { _ in },
         omarchyLinkStatus: @escaping () -> StartMenuOmarchyLinkMenuState? = { nil },
         setOmarchyLinkMode: @escaping (OmarchyLinkMacService, OmarchyLinkServiceMode) -> Void = { _, _ in },
+        requestOmarchyLinkCalendarAccess: @escaping (@escaping (Bool) -> Void) -> Void = { completion in
+            completion(false)
+        },
         launch: @escaping () -> Void
     ) {
         self.accessibilityStatus = accessibilityStatus
@@ -313,6 +317,7 @@ final class StartMenuWindow: NSObject, NSWindowDelegate {
         self.setImmersiveMode = setImmersiveMode
         self.omarchyLinkStatus = omarchyLinkStatus
         self.setOmarchyLinkMode = setOmarchyLinkMode
+        self.requestOmarchyLinkCalendarAccess = requestOmarchyLinkCalendarAccess
         self.launch = launch
 
         window = NSWindow(
@@ -571,20 +576,36 @@ final class StartMenuWindow: NSObject, NSWindowDelegate {
         if let linkState = omarchyLinkStatus() {
             let linkPresentation = StartMenuPresentation.omarchyLink(
                 modes: linkState.modes,
-                availability: linkState.availability
+                availability: linkState.availability,
+                calendarAuthorization: linkState.calendarAuthorization
             )
-            let linkActions: [(String, Selector)] = linkPresentation.serviceActions.map { action in
+            var linkActions: [(String, Selector)] = linkPresentation.serviceActions.map { action in
                 switch action.service {
                 case .calendar: (action.title, #selector(cycleOmarchyLinkCalendarMode))
                 case .messages: (action.title, #selector(cycleOmarchyLinkMessagesMode))
                 case .notes: (action.title, #selector(cycleOmarchyLinkNotesMode))
                 }
             }
+            var linkDetail = linkPresentation.detail
+            var linkDetailLines = linkPresentation.compactDetailLines
+            if let calendarAccessDetail = linkPresentation.calendarAccessDetail {
+                linkDetail += " " + calendarAccessDetail
+                linkDetailLines = (linkDetailLines ?? [linkPresentation.detail]) + [calendarAccessDetail]
+            }
+            if let actionTitle = linkPresentation.calendarAccessActionTitle,
+               let action = linkPresentation.calendarAccessAction {
+                linkActions.append((
+                    actionTitle,
+                    action == .openSettings
+                        ? #selector(openOmarchyLinkCalendarSettings)
+                        : #selector(beginOmarchyLinkCalendarAccessRequest)
+                ))
+            }
             omarchyLinkRow = permissionRow(
                 symbolName: "link",
                 title: "Omarchy Link",
-                detail: linkPresentation.detail,
-                compactDetailLines: linkPresentation.compactDetailLines,
+                detail: linkDetail,
+                compactDetailLines: linkDetailLines,
                 granted: linkPresentation.isGranted,
                 statusLabels: (linkPresentation.grantedStatusLabel, "\u{25cb}  Off"),
                 actions: linkActions,
@@ -1364,6 +1385,31 @@ final class StartMenuWindow: NSObject, NSWindowDelegate {
 
     @objc private func cycleOmarchyLinkNotesMode() {
         cycleOmarchyLinkMode(.notes)
+    }
+
+    private var omarchyLinkCalendarRequestInFlight = false
+
+    @objc private func beginOmarchyLinkCalendarAccessRequest() {
+        guard !omarchyLinkCalendarRequestInFlight else { return }
+        permissionWindowRestorer.cancel()
+        let windowFrame = window.frame
+        omarchyLinkCalendarRequestInFlight = true
+        requestOmarchyLinkCalendarAccess { [weak self] _ in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.omarchyLinkCalendarRequestInFlight = false
+                self.render()
+                self.permissionWindowRestorer.requestDidFinish(preserving: windowFrame)
+            }
+        }
+    }
+
+    @objc private func openOmarchyLinkCalendarSettings() {
+        permissionWindowRestorer.cancel()
+        guard let url = URL(
+            string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars"
+        ) else { return }
+        NSWorkspace.shared.open(url)
     }
 
     private func cycleOmarchyLinkMode(_ service: OmarchyLinkMacService) {

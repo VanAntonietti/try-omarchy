@@ -38,6 +38,8 @@
   <string>Try Omarchy reads and writes this folder only if you choose to share it with Omarchy.</string>
   <key>NSDownloadsFolderUsageDescription</key>
   <string>Try Omarchy reads and writes this folder only if you choose to share it with Omarchy.</string>
+  <key>NSCalendarsFullAccessUsageDescription</key>
+  <string>Try Omarchy reads your Calendar only for the Omarchy Link services you turn on, and creates events only after you approve each one.</string>
   <key>NSCameraUsageDescription</key>
   <string>Try Omarchy uses the Mac camera only while software inside the virtual machine records video.</string>
   <key>NSMicrophoneUsageDescription</key>

@@ -140,7 +140,8 @@ struct OmarchyLinkSessionTests {
         ))
         var host = OmarchyLinkHostSession(
             serviceModes: OmarchyLinkServiceModes(calendar: .readWrite, messages: .read, notes: .read),
-            workspaceIdentity: identity
+            workspaceIdentity: identity,
+            calendarAuthorization: .authorized
         )
         let reply = host.receive(try workspaceHello(identity: nil))
         let failure = OmarchyLinkSessionFailure(
@@ -160,7 +161,8 @@ struct OmarchyLinkSessionTests {
         ))
         var host = OmarchyLinkHostSession(
             serviceModes: OmarchyLinkServiceModes(calendar: .read, messages: .off, notes: .off),
-            workspaceIdentity: identity
+            workspaceIdentity: identity,
+            calendarAuthorization: .authorized
         )
         let reply = host.receive(try workspaceHello(identity: identity.rawValue))
         #expect(reply.status == .available(OmarchyLinkNegotiatedSession(
@@ -183,7 +185,8 @@ struct OmarchyLinkSessionTests {
         for presented in invalid {
             var host = OmarchyLinkHostSession(
                 serviceModes: OmarchyLinkServiceModes(calendar: .readWrite, messages: .readWrite, notes: .readWrite),
-                workspaceIdentity: identity
+                workspaceIdentity: identity,
+                calendarAuthorization: .authorized
             )
             let reply = host.receive(try workspaceHello(identity: presented))
             expectInvalidWorkspaceIdentity(reply)
@@ -203,7 +206,8 @@ struct OmarchyLinkSessionTests {
             #expect(identity == nil)
             var host = OmarchyLinkHostSession(
                 serviceModes: OmarchyLinkServiceModes(calendar: .readWrite, messages: .off, notes: .off),
-                workspaceIdentity: identity
+                workspaceIdentity: identity,
+                calendarAuthorization: .authorized
             )
             let reply = host.receive(try workspaceHello(identity: rawIdentity))
             expectInvalidWorkspaceIdentity(reply)

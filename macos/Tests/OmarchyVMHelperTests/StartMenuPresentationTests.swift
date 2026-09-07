@@ -266,7 +266,8 @@ struct StartMenuPresentationTests {
     func omarchyLinkWorkspaceGuidance() {
         let presentation = StartMenuPresentation.omarchyLink(
             modes: OmarchyLinkServiceModes(calendar: .read, messages: .off, notes: .readWrite),
-            availability: .workspace
+            availability: .workspace,
+            calendarAuthorization: .authorized
         )
 
         #expect(presentation.detail.contains("private data"))
@@ -290,7 +291,8 @@ struct StartMenuPresentationTests {
     func omarchyLinkEphemeralGuidance() {
         let presentation = StartMenuPresentation.omarchyLink(
             modes: .allOff,
-            availability: .ephemeral
+            availability: .ephemeral,
+            calendarAuthorization: .authorized
         )
 
         #expect(presentation.detail.contains("this run only"))
@@ -304,13 +306,72 @@ struct StartMenuPresentationTests {
     func omarchyLinkUnavailableGuidance() {
         let presentation = StartMenuPresentation.omarchyLink(
             modes: .allOff,
-            availability: .unavailable
+            availability: .unavailable,
+            calendarAuthorization: .denied
         )
 
         #expect(presentation.detail.contains("unavailable"))
         #expect(presentation.detail.contains("still starts"))
         #expect(!presentation.isGranted)
         #expect(presentation.serviceActions.isEmpty)
+        // No mode can be chosen, so no Calendar remediation applies either.
+        #expect(presentation.calendarAccessDetail == nil)
+        #expect(presentation.calendarAccessAction == nil)
+    }
+
+    @Test("each Apple Calendar grant state gets accurate non-fatal remediation")
+    func omarchyLinkCalendarGrantRemediation() {
+        let readModes = OmarchyLinkServiceModes(calendar: .read, messages: .off, notes: .off)
+
+        let granted = StartMenuPresentation.omarchyLink(
+            modes: readModes, availability: .workspace, calendarAuthorization: .authorized
+        )
+        #expect(granted.calendarAccessDetail == nil)
+        #expect(granted.calendarAccessActionTitle == nil)
+        #expect(granted.calendarAccessAction == nil)
+
+        let notDetermined = StartMenuPresentation.omarchyLink(
+            modes: readModes, availability: .workspace, calendarAuthorization: .notDetermined
+        )
+        #expect(notDetermined.calendarAccessDetail?.contains("hasn\u{2019}t been asked") == true)
+        #expect(notDetermined.calendarAccessDetail?.contains("everything else still works") == true)
+        #expect(notDetermined.calendarAccessActionTitle == "Allow Calendar\u{2026}")
+        #expect(notDetermined.calendarAccessAction == .request)
+
+        let denied = StartMenuPresentation.omarchyLink(
+            modes: readModes, availability: .workspace, calendarAuthorization: .denied
+        )
+        #expect(denied.calendarAccessDetail?.contains("turned off for Try Omarchy") == true)
+        #expect(denied.calendarAccessDetail?.contains("System Settings") == true)
+        #expect(denied.calendarAccessActionTitle == "Open Settings")
+        #expect(denied.calendarAccessAction == .openSettings)
+
+        let restricted = StartMenuPresentation.omarchyLink(
+            modes: readModes, availability: .workspace, calendarAuthorization: .restricted
+        )
+        #expect(restricted.calendarAccessDetail?.contains("restricted") == true)
+        #expect(restricted.calendarAccessActionTitle == nil)
+        #expect(restricted.calendarAccessAction == nil)
+
+        // Mode choices survive every grant state: remediation never removes
+        // the user's Service Mode controls or claims the VM is affected.
+        for presentation in [notDetermined, denied, restricted] {
+            #expect(presentation.serviceActions.count == 3)
+            #expect(presentation.calendarAccessDetail?.localizedCaseInsensitiveContains("permission") != true)
+        }
+    }
+
+    @Test("a Calendar mode of Off asks for no Calendar remediation")
+    func omarchyLinkOffModeNeedsNoRemediation() {
+        for state in [
+            OmarchyLinkCalendarAuthorizationState.authorized, .denied, .restricted, .notDetermined,
+        ] {
+            let presentation = StartMenuPresentation.omarchyLink(
+                modes: .allOff, availability: .workspace, calendarAuthorization: state
+            )
+            #expect(presentation.calendarAccessDetail == nil, "grant: \(state)")
+            #expect(presentation.calendarAccessAction == nil, "grant: \(state)")
+        }
     }
 
     @Test("cycling a Service Mode never skips or invents a mode")

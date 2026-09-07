@@ -22,7 +22,13 @@ struct StartMenuOmarchyLinkRowTests {
         var modes = OmarchyLinkServiceModes.allOff
         var recorded: [(OmarchyLinkMacService, OmarchyLinkServiceMode)] = []
         let menu = makeMenu(
-            linkState: { StartMenuOmarchyLinkMenuState(availability: .workspace, modes: modes) },
+            linkState: {
+                StartMenuOmarchyLinkMenuState(
+                    availability: .workspace,
+                    modes: modes,
+                    calendarAuthorization: .authorized
+                )
+            },
             setMode: { service, mode in
                 recorded.append((service, mode))
                 modes = modes.updating(service, to: mode)
@@ -58,7 +64,11 @@ struct StartMenuOmarchyLinkRowTests {
         _ = NSApplication.shared
         let menu = makeMenu(
             linkState: {
-                StartMenuOmarchyLinkMenuState(availability: .unavailable, modes: .allOff)
+                StartMenuOmarchyLinkMenuState(
+                    availability: .unavailable,
+                    modes: .allOff,
+                    calendarAuthorization: .authorized
+                )
             },
             setMode: { _, _ in Issue.record("unavailable Link must not accept mode changes") }
         )
@@ -69,6 +79,34 @@ struct StartMenuOmarchyLinkRowTests {
         #expect(descendant(withIdentifier: "permission-row-link", in: content) != nil)
         #expect(descendant(withIdentifier: "permission-action-link", in: content) == nil)
         #expect(descendant(withIdentifier: "permission-action-link-0", in: content) == nil)
+    }
+
+    @Test("a denied Apple grant renders remediation without hiding mode choices")
+    func deniedGrantRendersRemediationAction() throws {
+        _ = NSApplication.shared
+        let menu = makeMenu(
+            linkState: {
+                StartMenuOmarchyLinkMenuState(
+                    availability: .workspace,
+                    modes: OmarchyLinkServiceModes(calendar: .read, messages: .off, notes: .off),
+                    calendarAuthorization: .denied
+                )
+            },
+            setMode: { _, _ in }
+        )
+        menu.prepareForPresentation(visibleFrame: NSRect(x: 0, y: 0, width: 1440, height: 900))
+        defer { menu.dismiss() }
+
+        let content = try #require(menu.window.contentView)
+        // The three Service Mode buttons stay, and one remediation button follows.
+        let calendarButton = try #require(
+            descendant(withIdentifier: "permission-action-link-0", in: content) as? NSButton
+        )
+        #expect(calendarButton.title == "Calendar: Read")
+        let remediationButton = try #require(
+            descendant(withIdentifier: "permission-action-link-3", in: content) as? NSButton
+        )
+        #expect(remediationButton.title == "Open Settings")
     }
 
     private func makeMenu(

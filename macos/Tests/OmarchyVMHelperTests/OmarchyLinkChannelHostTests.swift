@@ -14,7 +14,11 @@ struct OmarchyLinkChannelHostTests {
     private func makeHost(
         modes: OmarchyLinkServiceModes = OmarchyLinkChannelHostTests.modes
     ) -> OmarchyLinkChannelHost {
-        OmarchyLinkChannelHost(serviceModes: modes, workspaceIdentity: Self.identity)
+        OmarchyLinkChannelHost(
+            serviceModes: modes,
+            workspaceIdentity: Self.identity,
+            calendarAuthorization: .authorized
+        )
     }
 
     private func frame(_ object: [String: Any]) throws -> Data {

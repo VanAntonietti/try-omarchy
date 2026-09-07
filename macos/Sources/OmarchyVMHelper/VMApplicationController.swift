@@ -217,6 +217,9 @@ final class VMApplicationController: NSObject, NSApplicationDelegate {
             setOmarchyLinkMode: { [weak self] service, mode in
                 self?.setOmarchyLinkMode(service, to: mode)
             },
+            requestOmarchyLinkCalendarAccess: { completion in
+                OmarchyLinkCalendarAccessPreflight.requestFullAccess(completion: completion)
+            },
             launch: { [weak self] in
                 self?.startVirtualMachine()
             }
@@ -231,16 +234,29 @@ final class VMApplicationController: NSObject, NSApplicationDelegate {
     /// nil hides the Link row entirely; Omarchy Link has no release UI yet.
     private func omarchyLinkMenuState() -> StartMenuOmarchyLinkMenuState? {
         guard baseEnvironment["OMARCHY_LINK_DEVELOPMENT"] == "1" else { return nil }
+        // Read fresh on every render so remediation reflects a grant the user
+        // just changed. The running Link Session still captures its own
+        // snapshot at bridge start.
+        let calendarAuthorization = OmarchyLinkCalendarAccessPreflight.authorizationState()
         switch omarchyLinkLaunchAccess() {
         case .workspace(let identity):
             return StartMenuOmarchyLinkMenuState(
                 availability: .workspace,
-                modes: omarchyLinkModeStore.load(for: identity)
+                modes: omarchyLinkModeStore.load(for: identity),
+                calendarAuthorization: calendarAuthorization
             )
         case .ephemeral(let modes):
-            return StartMenuOmarchyLinkMenuState(availability: .ephemeral, modes: modes)
+            return StartMenuOmarchyLinkMenuState(
+                availability: .ephemeral,
+                modes: modes,
+                calendarAuthorization: calendarAuthorization
+            )
         case .unavailable:
-            return StartMenuOmarchyLinkMenuState(availability: .unavailable, modes: .allOff)
+            return StartMenuOmarchyLinkMenuState(
+                availability: .unavailable,
+                modes: .allOff,
+                calendarAuthorization: calendarAuthorization
+            )
         }
     }
 

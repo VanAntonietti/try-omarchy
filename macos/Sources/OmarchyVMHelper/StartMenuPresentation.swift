@@ -42,6 +42,7 @@ enum StartMenuOmarchyLinkAvailability: Equatable {
 struct StartMenuOmarchyLinkMenuState: Equatable {
     let availability: StartMenuOmarchyLinkAvailability
     let modes: OmarchyLinkServiceModes
+    let calendarAuthorization: OmarchyLinkCalendarAuthorizationState
 }
 
 struct StartMenuOmarchyLinkServiceAction: Equatable {
@@ -55,6 +56,11 @@ struct StartMenuOmarchyLinkPresentation: Equatable {
     let isGranted: Bool
     let grantedStatusLabel: String
     let serviceActions: [StartMenuOmarchyLinkServiceAction]
+    /// Non-fatal remediation when the Calendar Service Mode wants access the
+    /// Apple grant does not provide. nil means nothing needs attention.
+    let calendarAccessDetail: String?
+    let calendarAccessActionTitle: String?
+    let calendarAccessAction: StartMenuPermissionAction?
 }
 
 extension OmarchyLinkServiceMode {
@@ -247,7 +253,8 @@ enum StartMenuPresentation {
     /// Apple permission or security entitlement.
     static func omarchyLink(
         modes: OmarchyLinkServiceModes,
-        availability: StartMenuOmarchyLinkAvailability
+        availability: StartMenuOmarchyLinkAvailability,
+        calendarAuthorization: OmarchyLinkCalendarAuthorizationState
     ) -> StartMenuOmarchyLinkPresentation {
         if availability == .unavailable {
             let lines = [
@@ -259,9 +266,17 @@ enum StartMenuPresentation {
                 compactDetailLines: lines,
                 isGranted: false,
                 grantedStatusLabel: "\u{25cf}  0 On",
-                serviceActions: []
+                serviceActions: [],
+                calendarAccessDetail: nil,
+                calendarAccessActionTitle: nil,
+                calendarAccessAction: nil
             )
         }
+
+        let calendarAccess = calendarAccessRemediation(
+            mode: modes.calendar,
+            authorization: calendarAuthorization
+        )
 
         let exposure = "Turning on Read or Read & Write exposes that service\u{2019}s "
             + "private data to every process in the trusted Owner session inside Omarchy."
@@ -283,8 +298,44 @@ enum StartMenuPresentation {
                     service: service,
                     title: "\(service.menuDisplayName): \(modes.mode(for: service).menuDisplayName)"
                 )
-            }
+            },
+            calendarAccessDetail: calendarAccess?.detail,
+            calendarAccessActionTitle: calendarAccess?.actionTitle,
+            calendarAccessAction: calendarAccess?.action
         )
+    }
+
+    /// Accurate per-grant remediation, shown only when the Calendar Service
+    /// Mode is on but the Apple grant blocks it. Every state is non-fatal:
+    /// the VM and the other Mac Services stay available, and the wording must
+    /// distinguish the Try Omarchy choice from the macOS grant.
+    private static func calendarAccessRemediation(
+        mode: OmarchyLinkServiceMode,
+        authorization: OmarchyLinkCalendarAuthorizationState
+    ) -> (detail: String, actionTitle: String?, action: StartMenuPermissionAction?)? {
+        guard mode != .off else { return nil }
+        switch authorization {
+        case .authorized:
+            return nil
+        case .notDetermined:
+            return (
+                detail: "Calendar is on for Omarchy Link, but this Mac hasn\u{2019}t been asked for Calendar access yet. Calendar stays unavailable inside Omarchy until it is allowed; everything else still works.",
+                actionTitle: "Allow Calendar\u{2026}",
+                action: .request
+            )
+        case .denied:
+            return (
+                detail: "macOS Calendar access is turned off for Try Omarchy, so Calendar is unavailable inside Omarchy. Everything else still works. Turn it on in System Settings > Privacy & Security > Calendars.",
+                actionTitle: "Open Settings",
+                action: .openSettings
+            )
+        case .restricted:
+            return (
+                detail: "macOS Calendar access is restricted by this Mac\u{2019}s policy, so Calendar is unavailable inside Omarchy. Everything else still works.",
+                actionTitle: nil,
+                action: nil
+            )
+        }
     }
 
     static func immersiveDetail(isEnabled: Bool) -> String {

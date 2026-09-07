@@ -15,10 +15,15 @@ struct OmarchyLinkChannelHost {
     private var requestIDs = Set<String>()
     private var closed = false
 
-    init(serviceModes: OmarchyLinkServiceModes, workspaceIdentity: OmarchyLinkWorkspaceIdentity) {
+    init(
+        serviceModes: OmarchyLinkServiceModes,
+        workspaceIdentity: OmarchyLinkWorkspaceIdentity,
+        calendarAuthorization: OmarchyLinkCalendarAuthorizationState
+    ) {
         session = OmarchyLinkHostSession(
             serviceModes: serviceModes,
-            workspaceIdentity: workspaceIdentity
+            workspaceIdentity: workspaceIdentity,
+            calendarAuthorization: calendarAuthorization
         )
     }
 
@@ -154,7 +159,8 @@ final class OmarchyLinkChannelBridge {
         targetPID: pid_t,
         socketPath: String,
         serviceModes: OmarchyLinkServiceModes,
-        workspaceIdentity: OmarchyLinkWorkspaceIdentity
+        workspaceIdentity: OmarchyLinkWorkspaceIdentity,
+        calendarAuthorization: OmarchyLinkCalendarAuthorizationState
     ) throws {
         guard let processIdentity = KernelProcessIdentity.capture(processIdentifier: targetPID),
               processIdentity.isQEMUSystemProcess else {
@@ -166,7 +172,8 @@ final class OmarchyLinkChannelBridge {
         )
         host = OmarchyLinkChannelHost(
             serviceModes: serviceModes,
-            workspaceIdentity: workspaceIdentity
+            workspaceIdentity: workspaceIdentity,
+            calendarAuthorization: calendarAuthorization
         )
     }
 

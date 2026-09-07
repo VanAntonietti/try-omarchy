@@ -119,11 +119,22 @@ do {
                   messages: arguments[5],
                   notes: arguments[6]
               ) else { usage() }
+        // Captured once for this Link Session, like the Service Modes. The
+        // grant only narrows what Calendar advertises; a missing grant is
+        // reported as status and never fails the bridge or the VM.
+        let calendarAuthorization = OmarchyLinkCalendarAccessPreflight.authorizationState()
+        if let warning = OmarchyLinkCalendarAccessPolicy.launchWarning(
+            mode: serviceModes.calendar,
+            authorization: calendarAuthorization
+        ) {
+            fputs("[omarchy-link] \(warning)\n", stderr)
+        }
         let bridge = try OmarchyLinkChannelBridge(
             targetPID: processIdentifier,
             socketPath: arguments[2],
             serviceModes: serviceModes,
-            workspaceIdentity: workspaceIdentity
+            workspaceIdentity: workspaceIdentity,
+            calendarAuthorization: calendarAuthorization
         )
         for signalNumber in [SIGINT, SIGTERM] {
             Darwin.signal(signalNumber, SIG_IGN)
