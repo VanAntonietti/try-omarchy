@@ -113,16 +113,4 @@ struct StartMenuWindowWidthTests {
             #expect(frame.maxX <= row.bounds.maxX - 124 - 12 + 0.5)
         }
     }
-
-    private func descendant(withIdentifier identifier: String, in view: NSView) -> NSView? {
-        if view.identifier?.rawValue == identifier {
-            return view
-        }
-        for subview in view.subviews {
-            if let match = descendant(withIdentifier: identifier, in: subview) {
-                return match
-            }
-        }
-        return nil
-    }
 }

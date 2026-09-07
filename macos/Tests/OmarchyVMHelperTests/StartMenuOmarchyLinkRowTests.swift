@@ -102,16 +102,4 @@ struct StartMenuOmarchyLinkRowTests {
             launch: {}
         )
     }
-
-    private func descendant(withIdentifier identifier: String, in view: NSView) -> NSView? {
-        if view.identifier?.rawValue == identifier {
-            return view
-        }
-        for subview in view.subviews {
-            if let match = descendant(withIdentifier: identifier, in: subview) {
-                return match
-            }
-        }
-        return nil
-    }
 }
