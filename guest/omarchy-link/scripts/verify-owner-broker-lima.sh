@@ -200,7 +200,10 @@ step "Check 4: the Owner service stops cleanly and works after restart"
 vmroot <<'RESTART'
 owner=$(cat /run/verify-owner-name)
 systemctl --user --machine="$owner@" stop omarchy-link.service
-sleep 1
+for _ in $(seq 30); do
+  [[ -e /run/user/1000/omarchy-link ]] || break
+  sleep 1
+done
 [[ ! -e /run/user/1000/omarchy-link ]] ||
   { echo "the runtime directory survived a stop" >&2; exit 1; }
 echo "runtime directory removed on stop"
