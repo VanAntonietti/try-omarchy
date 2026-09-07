@@ -10,6 +10,10 @@ Try Omarchy packages a project-built ARM64 Arch Linux image configured with Omar
 
 <img width="800" src="https://github.com/user-attachments/assets/1368a8f5-5099-43e4-8d3b-3d7d7fba0326" />
 
+The Omarchy mark in the app icon is sourced from the
+[official Omarchy brand kit](https://omarchy.org/brand/) and remains subject to
+Omarchy's trademark rights.
+
 ## Highlights
 
 - Hardware-accelerated ARM64 virtualization and VirGL graphics
@@ -137,7 +141,7 @@ port. The `dtc` mirror should be reverted once kernel.org returns.
 2. Open the DMG and drag **Try Omarchy** to **Applications**.
 3. Launch **Try Omarchy** from Applications.
 
-Every launch begins at the start menu. **Immersive** is on by default, so Omarchy opens Full Screen with the Mac menu bar and Dock hidden. Turn it off to open a resizable window; if you later enter Full Screen, the Mac menu bar and Dock remain available at the screen edges. Whenever the Omarchy window is focused, Command belongs to the guest as Super in either mode; Accessibility permission lets system shortcuts such as Command-Space reach it before macOS. Microphone and camera access are optional. The first launch takes longer while the app prepares Linux and starts Omarchy's account provisioning.
+Every launch begins at the start menu. While that menu is open, Try Omarchy behaves like a regular Mac app with standard Quit, Close Window, and Minimize commands; after the VM starts, that native app chrome steps aside for Omarchy. **Immersive** is on by default, so Omarchy opens Full Screen with the Mac menu bar and Dock hidden. Turn it off to open a resizable window; if you later enter Full Screen, the Mac menu bar and Dock remain available at the screen edges. Whenever the Omarchy window is focused, Command belongs to the guest as Super in either mode; Accessibility permission lets system shortcuts such as Command-Space reach it before macOS. Microphone and camera access are optional. The first launch takes longer while the app prepares Linux and starts Omarchy's account provisioning.
 
 Restarting from inside Omarchy reboots the guest in the same Try Omarchy app.
 Shutting down Omarchy closes the app and leaves it closed.
@@ -259,6 +263,8 @@ does not remove or replace this data. An existing VM keeps both its writable
 disk and the exact kernel, initramfs, and base command line that were paired
 with that disk. A newer app's bundled factory image is used only to create a
 new VM, after a confirmed **Reset Omarchy**, or for an ephemeral launch.
+Before Reset is enabled, the confirmation sheet requires typing `Try Omarchy`
+exactly; cancelling the sheet returns to the start menu without changing the VM.
 
 VMs created before paired boot files were introduced are preserved too. On the
 first launch that needs them, Try Omarchy explains the transition in a
@@ -347,6 +353,11 @@ individual component command).
 Artifacts created before their `.build/state/` record exists are rebuilt once;
 the cache never adopts an output whose successful inputs it did not observe.
 
+The generated app lives under `dist/app.noindex/`. macOS can run and package
+the bundle normally, but Spotlight will not present it beside an installed
+copy as a second, indistinguishable Command-Space result. The first app rebuild
+after this layout change removes the old generated bundle from `dist/`.
+
 Launching also ensures that the guest, runtime, and native app are current, so
 the normal follow-up command is:
 
@@ -398,7 +409,8 @@ All generated output has one predictable home:
 
 ```text
 dist/
-├── Try Omarchy.app
+├── app.noindex/
+│   └── Try Omarchy.app
 ├── TryOmarchy.dmg        # after make package or make release
 └── guest/                # verified guest build artifacts
 ```

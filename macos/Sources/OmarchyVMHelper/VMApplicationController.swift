@@ -4,6 +4,47 @@ import Darwin
 import Foundation
 
 @MainActor
+final class HostPowerNotificationObserver {
+    private let center: NotificationCenter
+    private var tokens: [NSObjectProtocol] = []
+
+    init(
+        center: NotificationCenter = NSWorkspace.shared.notificationCenter,
+        onWillSleep: @escaping @MainActor () -> Void,
+        onDidWake: @escaping @MainActor () -> Void
+    ) {
+        self.center = center
+        tokens = [
+            center.addObserver(
+                forName: NSWorkspace.willSleepNotification,
+                object: nil,
+                queue: .main
+            ) { _ in
+                MainActor.assumeIsolated {
+                    onWillSleep()
+                }
+            },
+            center.addObserver(
+                forName: NSWorkspace.didWakeNotification,
+                object: nil,
+                queue: .main
+            ) { _ in
+                MainActor.assumeIsolated {
+                    onDidWake()
+                }
+            },
+        ]
+    }
+
+    func stop() {
+        for token in tokens {
+            center.removeObserver(token)
+        }
+        tokens = []
+    }
+}
+
+@MainActor
 final class VMApplicationController: NSObject, NSApplicationDelegate {
     private let launcherURL: URL
     private let initialArguments: [String]
@@ -21,6 +62,8 @@ final class VMApplicationController: NSObject, NSApplicationDelegate {
     private let bundledMetrics: BundledGuestMetrics?
     private var startMenuWindow: StartMenuWindow?
     private var volumeObserver: NSObjectProtocol?
+    private var hostPowerObserver: HostPowerNotificationObserver?
+    private let hostSleepCoordinator = VMHostSleepCoordinator()
 
     /// The workspace the running VM is writing to, so an unmount of its volume
     /// can be recognized as the disk disappearing under QEMU.
@@ -35,6 +78,7 @@ final class VMApplicationController: NSObject, NSApplicationDelegate {
     private var applicationTerminationPending = false
     private var virtualMachineReachedStart = false
     private var activeLaunchAllowedBootRecovery = false
+    private var pendingHostSleepControlFailure: String?
 
     /// True while a modal alert this controller opened itself (rather than
     /// AppKit) is on screen awaiting a click. `finish()`'s watchdog checks
@@ -78,6 +122,7 @@ final class VMApplicationController: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         observeVolumeUnmounts()
+        observeHostPowerEvents()
         showStartMenu()
     }
 
@@ -242,7 +287,9 @@ final class VMApplicationController: NSObject, NSApplicationDelegate {
     }
 
     private func startVirtualMachine(allowBootRecovery: Bool = false) {
+        cancelHostWakeRetry()
         virtualMachineReachedStart = false
+        pendingHostSleepControlFailure = nil
         do {
             let accessibilityDecision = AccessibilityLaunchDecision.make(
                 for: AXIsProcessTrusted() ? .authorized : .unavailable
@@ -360,6 +407,8 @@ final class VMApplicationController: NSObject, NSApplicationDelegate {
     private func resetDidExit(status: Int32) {
         guard childRunning else { return }
         childRunning = false
+        cancelHostWakeRetry()
+        hostSleepCoordinator.disconnect()
         let wasStopping = lifecycle.isStopping
         lifecycle.childExited()
         if applicationTerminationPending {
@@ -379,6 +428,7 @@ final class VMApplicationController: NSObject, NSApplicationDelegate {
         guard childRunning else { return .terminateNow }
         guard !applicationTerminationPending else { return .terminateLater }
 
+        cancelHostWakeRetry()
         applicationTerminationPending = true
         lifecycle.requestQuit()
         supervisor.forward(signal: SIGTERM)
@@ -387,6 +437,7 @@ final class VMApplicationController: NSObject, NSApplicationDelegate {
 
     func handleTerminationSignal(_ signal: Int32) {
         guard !applicationTerminationPending else { return }
+        cancelHostWakeRetry()
         lifecycle.requestTermination(signal: signal)
         if childRunning {
             supervisor.forward(signal: signal)
@@ -469,8 +520,9 @@ final class VMApplicationController: NSObject, NSApplicationDelegate {
                 arguments: arguments,
                 environment: environment,
                 launchEvent: { [weak self] event in
-                    if event == .virtualMachineReady {
-                        self?.virtualMachineDidStart()
+                    switch event {
+                    case .virtualMachineReady(let qmpSocketPath):
+                        self?.virtualMachineDidStart(qmpSocketPath: qmpSocketPath)
                     }
                 }
             ) { [weak self] status in
@@ -483,10 +535,33 @@ final class VMApplicationController: NSObject, NSApplicationDelegate {
         childRunning = true
     }
 
-    private func virtualMachineDidStart() {
+    private func virtualMachineDidStart(qmpSocketPath: String?) {
+        guard let qmpSocketPath else {
+            failHostSleepControlSetup(
+                detail: "the launcher did not provide a valid control socket"
+            )
+            return
+        }
+        do {
+            try hostSleepCoordinator.connect(to: qmpSocketPath)
+        } catch {
+            failHostSleepControlSetup(detail: error.localizedDescription)
+            return
+        }
         virtualMachineReachedStart = true
+        NSApp.setActivationPolicy(ApplicationPresentation.runningActivationPolicy)
         startMenuWindow?.dismiss()
         startMenuWindow = nil
+    }
+
+    private func failHostSleepControlSetup(detail: String) {
+        fputs(
+            "omarchy-vm-helper: host sleep control is unavailable: \(detail)\n",
+            stderr
+        )
+        pendingHostSleepControlFailure = "The virtual machine started, but Try Omarchy could not enable safe Mac sleep. Please close and reopen the app. (\(detail))"
+        lifecycle.requestQuit()
+        supervisor.forward(signal: SIGTERM)
     }
 
     private static var homeDirectory: String {
@@ -657,6 +732,93 @@ final class VMApplicationController: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func observeHostPowerEvents() {
+        hostPowerObserver = HostPowerNotificationObserver(
+            onWillSleep: { [weak self] in
+                self?.prepareForHostSleep()
+            },
+            onDidWake: { [weak self] in
+                self?.beginResumeAfterHostWake()
+            }
+        )
+    }
+
+    /// `willSleepNotification` observers may delay host sleep while they run.
+    /// Keep this synchronous so QEMU acknowledges `stop` before macOS freezes
+    /// the Hypervisor.framework process.
+    private func prepareForHostSleep() {
+        do {
+            try hostSleepCoordinator.prepareForHostSleep(
+                vmIsRunning: childRunning,
+                isStopping: lifecycle.isStopping
+            )
+        } catch {
+            fputs(
+                "omarchy-vm-helper: could not pause the VM before host sleep: \(error.localizedDescription)\n",
+                stderr
+            )
+        }
+    }
+
+    private func beginResumeAfterHostWake() {
+        cancelHostWakeRetry()
+        resumeAfterHostWake()
+    }
+
+    private func resumeAfterHostWake() {
+        do {
+            try hostSleepCoordinator.resumeAfterHostWake(
+                vmIsRunning: childRunning,
+                isStopping: lifecycle.isStopping
+            )
+            cancelHostWakeRetry()
+        } catch {
+            fputs(
+                "omarchy-vm-helper: could not resume the VM after host wake: \(error.localizedDescription)\n",
+                stderr
+            )
+            guard !(error is VMHostSleepControlError),
+                  hostSleepCoordinator.pausedForHostSleep,
+                  childRunning,
+                  !lifecycle.isStopping
+            else { return }
+            guard hostSleepCoordinator.scheduleWakeRetry({ [weak self] in
+                self?.resumeAfterHostWake()
+            }) else {
+                presentHostWakeRecovery(error: error)
+                return
+            }
+        }
+    }
+
+    private func cancelHostWakeRetry() {
+        hostSleepCoordinator.cancelWakeRetry()
+    }
+
+    private func presentHostWakeRecovery(error: Error) {
+        guard childRunning,
+              !lifecycle.isStopping,
+              hostSleepCoordinator.pausedForHostSleep
+        else { return }
+
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.alertStyle = .critical
+        alert.messageText = "Omarchy is still paused"
+        alert.informativeText = "Try Omarchy could not reconnect after this Mac woke, so the VM remains paused to protect its state. Try again, or quit the app. (\(error.localizedDescription))"
+        alert.addButton(withTitle: "Try Again")
+        alert.addButton(withTitle: "Quit Try Omarchy")
+
+        isPresentingBlockingAlert = true
+        let response = alert.runModal()
+        isPresentingBlockingAlert = false
+        if response == .alertFirstButtonReturn {
+            beginResumeAfterHostWake()
+        } else {
+            NSApp.terminate(nil)
+        }
+    }
+
     private func handleVolumeUnmount(at volume: URL) {
         guard childRunning, !lifecycle.isStopping, let root = activeStateRoot else { return }
         let mountPoint = volume.standardizedFileURL.path
@@ -711,6 +873,8 @@ final class VMApplicationController: NSObject, NSApplicationDelegate {
         childRunning = false
         let launchAllowedBootRecovery = activeLaunchAllowedBootRecovery
         activeLaunchAllowedBootRecovery = false
+        cancelHostWakeRetry()
+        hostSleepCoordinator.disconnect()
         let recentStandardError = supervisor.recentStandardError
 
         let wasStopping = lifecycle.isStopping
@@ -719,9 +883,13 @@ final class VMApplicationController: NSObject, NSApplicationDelegate {
             reachedVirtualMachineStart: virtualMachineReachedStart,
             wasStopping: wasStopping
         )
+        let hostSleepControlFailure = pendingHostSleepControlFailure
+        pendingHostSleepControlFailure = nil
         lifecycle.childExited()
         if applicationTerminationPending {
             NSApp.reply(toApplicationShouldTerminate: true)
+        } else if let hostSleepControlFailure {
+            startMenuWindow?.launchDidFail(errorMessage: hostSleepControlFailure)
         } else {
             if presentation.showsStartupFailure,
                let startMenuWindow,

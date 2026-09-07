@@ -155,18 +155,20 @@ def main() -> None:
     verbatim_trees = authenticity["verbatimRuntimeTrees"]
     backported_trees = authenticity["backportedRuntimeTrees"]
     check(
-        not {"bin", "shell"} & set(verbatim_trees)
-        and backported_trees == ["bin", "shell"]
+        not {"bin", "install", "shell"} & set(verbatim_trees)
+        and backported_trees == ["bin", "install", "shell"]
         and not set(verbatim_trees) & set(backported_trees),
-        "patched bin and shell trees are separated from verbatim upstream runtime trees",
+        "patched bin, install, and shell trees are separated from verbatim upstream runtime trees",
     )
     backports = authenticity["backports"]
     check(
         [backport.get("id") for backport in backports]
         == [
             "1password-arm64-installer",
+            "vivaldi-arm64-browser",
             "notification-hover-close",
             "notification-screen-privacy",
+            "update-free-space-message",
         ],
         "Omarchy backports are explicitly ordered and identified",
     )
@@ -187,11 +189,29 @@ def main() -> None:
                 and re.fullmatch(r"[0-9a-f]{64}", target.get("afterSha256", "")) is not None,
                 f"backport target digests are pinned: {backport['id']} {target['path']}",
             )
+    update_free_space_patch = read(GUEST / "patches/omarchy/update-free-space-message.patch")
+    check(
+        "Omarchy VM disk, not on your Mac" in update_free_space_patch
+        and "/usr/share/try-omarchy/build-spec.json" in update_free_space_patch
+        and "df -h /" in update_free_space_patch,
+        "update free-space backport clarifies the guest VM disk requirement",
+    )
 
     post_build_installers = authenticity["postBuildUserInstallers"]
     check(
         post_build_installers
         == [
+            {
+                "id": "vivaldi-arm64",
+                "userInitiated": True,
+                "delivery": "pinned-signed-vendor-rpm",
+                "applicationUrl": "https://downloads.vivaldi.com/stable/vivaldi-stable-8.2.4133.33-1.aarch64.rpm",
+                "applicationSha256": "99fe7542199ba11d16d9af02783540c8c03554c37d80597a219595751414503d",
+                "signingKey": "keys/vivaldi-package-composer-key11.asc",
+                "signingFingerprint": "8D1FA52AEF58A09D889DD4221256C34716BD9233",
+                "runtimePackages": ["rpm-tools"],
+                "factoryProvenance": "installer-only",
+            },
             {
                 "id": "1password-arm64",
                 "userInitiated": True,
@@ -204,7 +224,7 @@ def main() -> None:
                 "factoryProvenance": "excluded",
             }
         ],
-        "mutable post-build 1Password installation is an explicit trust boundary",
+        "Vivaldi and mutable 1Password installation are explicit post-build trust boundaries",
     )
 
     pacman_conf = read(GUEST / spec["inputs"]["pacmanConfig"])
@@ -283,6 +303,31 @@ def main() -> None:
             for key in ("sha256", "binarySha256", "licenseSha256")
         ),
         "official ARM64 yay release and license are fully pinned",
+    )
+    vivaldi = spec.get("supplyChain", {}).get("vivaldi", {})
+    check(
+        vivaldi
+        == {
+            "version": "8.2.4133.33",
+            "rpmRelease": 1,
+            "pkgrel": 2,
+            "repository": "https://repo.vivaldi.com/stable",
+            "rpmUrl": "https://downloads.vivaldi.com/stable/vivaldi-stable-8.2.4133.33-1.aarch64.rpm",
+            "rpmSha256": "99fe7542199ba11d16d9af02783540c8c03554c37d80597a219595751414503d",
+            "signingKey": "keys/vivaldi-package-composer-key11.asc",
+            "signingKeySha256": "5c67d85c0aca9c0d166edb5bc5e6ebc21d67bce4e67c645e7bd76d299fd337ef",
+            "signingFingerprint": "8D1FA52AEF58A09D889DD4221256C34716BD9233",
+            "reportedVersion": "Vivaldi 8.2.4133.33",
+            "license": "Multiple, see https://www.vivaldi.com/",
+        },
+        "official signed Vivaldi ARM64 RPM and package key are fully pinned",
+    )
+    vivaldi_key = GUEST / vivaldi["signingKey"]
+    check(
+        vivaldi_key.is_file()
+        and hashlib.sha256(vivaldi_key.read_bytes()).hexdigest()
+        == vivaldi["signingKeySha256"],
+        "Vivaldi package key digest matches the build spec",
     )
     ttfx = spec.get("supplyChain", {}).get("ttfx", {})
     check(
@@ -372,6 +417,13 @@ def main() -> None:
         and hyprland_identity in launcher,
         "native launcher accepts and pins the patched Hyprland component",
     )
+    check(
+        'supply_chain.get("vivaldi")' in launcher
+        and '"build spec Vivaldi component"' in launcher
+        and vivaldi["rpmSha256"] in launcher
+        and vivaldi["signingFingerprint"] in launcher,
+        "native launcher accepts only the reviewed signed Vivaldi ARM64 release",
+    )
     hyprland_patch_text = read(hyprland_patch)
     check(
         "roundingWithBorderCoverage" in hyprland_patch_text
@@ -427,6 +479,20 @@ def main() -> None:
         and "omarchy-provision-autologin-once.service" in native_autologin,
         "native provisioning keeps direct graphical login across VM boots",
     )
+    fcitx_guard = read(
+        GUEST / "native-overlay/etc/systemd/user/omarchy-fcitx5.service.d/10-guard.conf"
+    )
+    check(
+        "ConditionPathExists=/usr/bin/fcitx5" in fcitx_guard,
+        "fcitx5 user unit is inert until the omitted binary is installed",
+    )
+    bt_agent_guard = read(
+        GUEST / "native-overlay/etc/systemd/user/bt-agent.service.d/10-guard.conf"
+    )
+    check(
+        "ConditionPathExists=/usr/bin/bt-agent" in bt_agent_guard,
+        "bt-agent user unit is inert until the omitted binary is installed",
+    )
     check("omarchy-native-audio-bridge" in configure, "guest installs native host-audio integration")
     check(
         "default.target.wants/omarchy-native-camera-bridge.service" in configure,
@@ -477,6 +543,12 @@ def main() -> None:
         and 'install -m 0644 "$arm_mirrorlist"' in configure
         and "install -m 0644 /etc/pacman.d/mirrorlist" not in configure,
         "ARM pacman restore uses Omarchy's pre-refresh hook and a pinned mirrorlist",
+    )
+    check(
+        "vivaldi-package-composer-key11.asc" in configure
+        and "usr/local/share/try-omarchy/vivaldi/linux_signing_key.pub" in configure
+        and '"$root/usr/local/lib/try-omarchy/install-vivaldi-arm64"' in configure,
+        "rootfs configuration stages the Vivaldi installer and pinned package key",
     )
     restore_hook = read(GUEST / "fragments/pre-refresh-pacman-restore-arm.sh")
     check(
@@ -566,6 +638,56 @@ def main() -> None:
         and 'cp -a "$cursor_restore" "$stage/usr/local/bin/omarchy-native-cursor-restore"'
         in register_runtime,
         "packaged Omarchy runtime owns the screensaver cursor helper",
+    )
+    vivaldi_installer_path = (
+        GUEST / "native-overlay/usr/local/lib/try-omarchy/install-vivaldi-arm64"
+    )
+    vivaldi_installer = read(vivaldi_installer_path)
+    check(
+        vivaldi_installer_path.stat().st_mode & stat.S_IXUSR != 0,
+        "Vivaldi ARM64 installer is executable",
+    )
+    check(
+        "--proto '=https'" in vivaldi_installer
+        and "--tlsv1.2" in vivaldi_installer
+        and "Vivaldi RPM digest mismatch" in vivaldi_installer
+        and "Vivaldi package key fingerprint mismatch" in vivaldi_installer
+        and "rpmkeys --dbpath" in vivaldi_installer
+        and "Payload SHA256 digest: OK" in vivaldi_installer
+        and "Vivaldi RPM contains unsafe paths" in vivaldi_installer
+        and "pkgname = vivaldi" in vivaldi_installer
+        and "provides = vivaldi-stable" in vivaldi_installer
+        and "--format=mtree" in vivaldi_installer
+        and "--uid 0" in vivaldi_installer
+        and "--gid 0" in vivaldi_installer
+        and "gzip -n -9 >.MTREE" in vivaldi_installer
+        and "could not generate the Vivaldi package mtree" in vivaldi_installer
+        and "sys.argv[1].strip()" in vivaldi_installer
+        and "already installed" in vivaldi_installer,
+        "Vivaldi installer verifies and packages one signed ARM64 vendor release with root-owned integrity metadata",
+    )
+    check(
+        "repo-add" in vivaldi_installer
+        and "repo-add --remove --quiet" in vivaldi_installer
+        and 'sudo pacman -S --needed --noconfirm "$repo_name/vivaldi"'
+        in vivaldi_installer
+        and "sudo pacman -U --needed --noconfirm" not in vivaldi_installer
+        and "classified as a foreign/AUR package" in vivaldi_installer
+        and "pacman -Qem" in vivaldi_installer
+        and "yay -Sua" in vivaldi_installer
+        and "/usr/share/try-omarchy/repo" in vivaldi_installer
+        and "/var/lib/pacman/sync/$repo_name.db" in vivaldi_installer
+        and "Re-registering installed Vivaldi" in vivaldi_installer,
+        "Vivaldi installer publishes into the local sync repository so Omarchy's AUR updater cannot take over",
+    )
+    check(
+        'vivaldi_installer="$root/usr/local/lib/try-omarchy/install-vivaldi-arm64"'
+        in register_runtime
+        and 'vivaldi_key="$root/usr/local/share/try-omarchy/vivaldi/linux_signing_key.pub"'
+        in register_runtime
+        and 'cp -a "$vivaldi_installer"' in register_runtime
+        and 'cp -a "$vivaldi_key"' in register_runtime,
+        "packaged Omarchy runtime owns the Vivaldi installer and signing key",
     )
     register_yay = read(GUEST / "scripts/register-pinned-yay.sh")
     check(
@@ -659,13 +781,29 @@ def main() -> None:
         and "excluded from factory provenance" in third_party_notices,
         "third-party notices distinguish mutable 1Password installation from redistribution",
     )
+    check(
+        "**Vivaldi**" in third_party_notices
+        and "not redistributed" in third_party_notices
+        and "signed official ARM64 RPM" not in third_party_notices
+        and "installer-only input" in third_party_notices
+        and "vivaldi.com/partners/linux" in third_party_notices,
+        "third-party notices distinguish signed Vivaldi installation from redistribution",
+    )
     architecture = read(REPO / "docs/architecture.md")
     check(
         "Optional, user-initiated installers" in architecture
         and "separate trust boundary" in architecture
         and "not redistributed in the app" in architecture
-        and post_build_installers[0]["factoryProvenance"] == "excluded",
-        "architecture documents mutable post-build user installation boundaries",
+        and "exact vendor artifact" in architecture
+        and next(
+            item for item in post_build_installers if item["id"] == "1password-arm64"
+        )["factoryProvenance"]
+        == "excluded"
+        and next(
+            item for item in post_build_installers if item["id"] == "vivaldi-arm64"
+        )["factoryProvenance"]
+        == "installer-only",
+        "architecture documents mutable and pinned post-build user installation boundaries",
     )
 
     finalizer = read(GUEST / "scripts/finalize-rootfs.sh")
@@ -684,6 +822,13 @@ def main() -> None:
         and "Rounded-border Hyprland backport is missing" in finalizer
         and "Rounded-border Hyprland binary digest mismatch" in finalizer,
         "finalizer requires the exact rounded-border Hyprland package",
+    )
+    check(
+        "Vivaldi must remain a user-initiated post-build install" in finalizer
+        and "pacman -Qoq \"$vivaldi_installer\"" in finalizer
+        and "pacman -Qoq \"$vivaldi_key\"" in finalizer
+        and "Vivaldi package key digest mismatch" in finalizer,
+        "finalizer excludes Vivaldi while requiring its owned authenticated installer",
     )
 
     ssh_generator_path = (
@@ -1043,6 +1188,7 @@ HOTPLUG=1
         *GUEST.glob("*.sh"),
         *GUEST.glob("scripts/*.sh"),
         *GUEST.glob("fragments/*.sh"),
+        vivaldi_installer_path,
     ]
     for path in sorted(shell_files):
         subprocess.run(["bash", "-n", str(path)], check=True)
@@ -1106,6 +1252,57 @@ HOTPLUG=1
                 "fresh-user background sorting selects the Try Omarchy wallpaper by default",
             )
 
+        with tempfile.TemporaryDirectory() as temporary:
+            staged_root = Path(temporary) / "root"
+            subprocess.run(
+                [
+                    "bash",
+                    str(GUEST / "scripts/materialize-omarchy.sh"),
+                    "--root",
+                    str(staged_root),
+                    "--source",
+                    str(source),
+                    "--spec",
+                    str(GUEST / "spec.json"),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            staged_icons = staged_root / "usr/share/icons/hicolor/256x256/apps"
+            icon_names = {path.name for path in staged_icons.iterdir() if path.is_file()}
+            expected_normalized_icons = {
+                "battle-net.png",
+                "disk-usage.png",
+                "google-contacts.png",
+                "google-maps.png",
+                "google-messages.png",
+                "google-photos.png",
+                "retro-gaming.png",
+            }
+            check(
+                expected_normalized_icons <= icon_names
+                and not {
+                    "Battle.net.png",
+                    "battle.net.png",
+                    "Disk Usage.png",
+                    "Google Contacts.png",
+                    "Google Maps.png",
+                    "Google Messages.png",
+                    "Google Photos.png",
+                    "Retro Gaming.png",
+                }
+                & icon_names,
+                "materialized application icons match their desktop icon names",
+            )
+            check(
+                all(
+                    all(0x21 <= byte <= 0x7E for byte in os.fsencode(path.name))
+                    for path in staged_icons.iterdir()
+                ),
+                "materialized application icon paths are GTK cache-safe",
+            )
+
         subprocess.run(
             [
                 "python3",
@@ -1167,7 +1364,9 @@ HOTPLUG=1
             )
             subprocess.run(["bash", "-n", str(onepassword_installer_path)], check=True)
             onepassword_installer = read(onepassword_installer_path)
-            onepassword_boundary = post_build_installers[0]
+            onepassword_boundary = next(
+                item for item in post_build_installers if item["id"] == "1password-arm64"
+            )
             check(
                 "[[ $(uname -m) == aarch64 ]]" in onepassword_installer
                 and onepassword_boundary["applicationUrl"] in onepassword_installer
@@ -1219,6 +1418,41 @@ HOTPLUG=1
                 '{ launch = "1password --quick-access" })'
                 in applications_bindings,
                 "1Password Quick Access has a Wayland compositor shortcut",
+            )
+
+            for relative in (
+                "bin/omarchy-install-browser",
+                "bin/omarchy-remove-browser",
+                "bin/omarchy-default-browser",
+                "bin/omarchy-theme-set-browser",
+                "bin/omarchy-theme-set-browser-policy",
+                "install/helpers/browser-policy.sh",
+            ):
+                subprocess.run(["bash", "-n", str(staged_omarchy / relative)], check=True)
+            install_browser = read(staged_omarchy / "bin/omarchy-install-browser")
+            remove_browser = read(staged_omarchy / "bin/omarchy-remove-browser")
+            default_browser = read(staged_omarchy / "bin/omarchy-default-browser")
+            theme_browser = read(staged_omarchy / "bin/omarchy-theme-set-browser")
+            theme_policy = read(staged_omarchy / "bin/omarchy-theme-set-browser-policy")
+            browser_policy = read(staged_omarchy / "install/helpers/browser-policy.sh")
+            check(
+                '"Vivaldi"' in install_browser
+                and "/usr/local/lib/try-omarchy/install-vivaldi-arm64" in install_browser
+                and "/etc/opt/vivaldi/policies/managed" in install_browser
+                and ".config/vivaldi-stable.conf" in install_browser
+                and 'vivaldi) desktop_id="vivaldi-stable.desktop"' in default_browser
+                and "set_fallback_default_browser vivaldi-stable.desktop" in remove_browser
+                and "omarchy-pkg-drop vivaldi" in remove_browser,
+                "Vivaldi participates in Omarchy install, default, and removal workflows",
+            )
+            check(
+                "/opt/vivaldi/" in theme_browser
+                and "refresh_running_browser /opt/vivaldi/ vivaldi-stable -f"
+                in theme_browser
+                and "/etc/opt/vivaldi/policies/managed" in theme_policy
+                and "/etc/opt/vivaldi/policies/managed" in browser_policy
+                and "/etc/opt/vivaldi/policies" in browser_policy,
+                "Vivaldi participates in Omarchy theme and managed-policy workflows",
             )
 
             notification_card = read(
