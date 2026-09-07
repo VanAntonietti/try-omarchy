@@ -262,6 +262,64 @@ struct StartMenuPresentationTests {
         ])
     }
 
+    @Test("Omarchy Link explains Owner-session read exposure without claiming an Apple permission")
+    func omarchyLinkWorkspaceGuidance() {
+        let presentation = StartMenuPresentation.omarchyLink(
+            modes: OmarchyLinkServiceModes(calendar: .read, messages: .off, notes: .readWrite),
+            availability: .workspace
+        )
+
+        #expect(presentation.detail.contains("private data"))
+        #expect(presentation.detail.contains("trusted Owner session"))
+        #expect(presentation.detail.contains("next launch"))
+        #expect(presentation.detail.contains("separate from"))
+        #expect(!presentation.detail.localizedCaseInsensitiveContains("entitlement"))
+        #expect(presentation.isGranted)
+        #expect(presentation.grantedStatusLabel == "\u{25cf}  2 On")
+        #expect(presentation.serviceActions == [
+            StartMenuOmarchyLinkServiceAction(service: .calendar, title: "Calendar: Read"),
+            StartMenuOmarchyLinkServiceAction(service: .messages, title: "Messages: Off"),
+            StartMenuOmarchyLinkServiceAction(service: .notes, title: "Notes: Read & Write"),
+        ])
+        for action in presentation.serviceActions {
+            #expect(!action.title.localizedCaseInsensitiveContains("permission"))
+        }
+    }
+
+    @Test("an ephemeral run presents one-run choices that are not saved")
+    func omarchyLinkEphemeralGuidance() {
+        let presentation = StartMenuPresentation.omarchyLink(
+            modes: .allOff,
+            availability: .ephemeral
+        )
+
+        #expect(presentation.detail.contains("this run only"))
+        #expect(presentation.detail.contains("not saved"))
+        #expect(presentation.detail.contains("trusted Owner session"))
+        #expect(!presentation.isGranted)
+        #expect(presentation.serviceActions.count == 3)
+    }
+
+    @Test("an invalid Workspace identity disables Link choices, not the VM")
+    func omarchyLinkUnavailableGuidance() {
+        let presentation = StartMenuPresentation.omarchyLink(
+            modes: .allOff,
+            availability: .unavailable
+        )
+
+        #expect(presentation.detail.contains("unavailable"))
+        #expect(presentation.detail.contains("still starts"))
+        #expect(!presentation.isGranted)
+        #expect(presentation.serviceActions.isEmpty)
+    }
+
+    @Test("cycling a Service Mode never skips or invents a mode")
+    func omarchyLinkModeCycle() {
+        #expect(OmarchyLinkServiceMode.off.nextMenuChoice == .read)
+        #expect(OmarchyLinkServiceMode.read.nextMenuChoice == .readWrite)
+        #expect(OmarchyLinkServiceMode.readWrite.nextMenuChoice == .off)
+    }
+
     @Test("immersive guidance distinguishes windowed and fullscreen launch")
     func immersiveGuidance() {
         #expect(StartMenuPresentation.immersiveDetail(isEnabled: true)

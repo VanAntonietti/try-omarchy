@@ -26,6 +26,69 @@ struct StartMenuPortForwardingPresentation: Equatable {
     let grantedStatusLabel: String
 }
 
+enum StartMenuOmarchyLinkAvailability: Equatable {
+    /// A persistent Workspace with a validated Link identity; choices persist
+    /// for that Workspace and freeze when Omarchy starts.
+    case workspace
+    /// A disposable run; choices apply to this run only and are not saved.
+    case ephemeral
+    /// The Workspace identity is missing or invalid, so only Link is off.
+    case unavailable
+}
+
+/// What the start menu knows about Omarchy Link for the upcoming launch.
+/// nil at the window level means Link development mode is off and no Link row
+/// is rendered at all.
+struct StartMenuOmarchyLinkMenuState: Equatable {
+    let availability: StartMenuOmarchyLinkAvailability
+    let modes: OmarchyLinkServiceModes
+}
+
+struct StartMenuOmarchyLinkServiceAction: Equatable {
+    let service: OmarchyLinkMacService
+    let title: String
+}
+
+struct StartMenuOmarchyLinkPresentation: Equatable {
+    let detail: String
+    let compactDetailLines: [String]?
+    let isGranted: Bool
+    let grantedStatusLabel: String
+    let serviceActions: [StartMenuOmarchyLinkServiceAction]
+}
+
+extension OmarchyLinkServiceMode {
+    /// User-facing Service Mode names. These name a Try Omarchy choice, never
+    /// an Apple permission or security entitlement.
+    var menuDisplayName: String {
+        switch self {
+        case .off: "Off"
+        case .read: "Read"
+        case .readWrite: "Read & Write"
+        }
+    }
+
+    /// One click advances a service to the next mode; the cycle covers every
+    /// mode so nothing wider than Read & Write can ever be reached.
+    var nextMenuChoice: OmarchyLinkServiceMode {
+        switch self {
+        case .off: .read
+        case .read: .readWrite
+        case .readWrite: .off
+        }
+    }
+}
+
+extension OmarchyLinkMacService {
+    var menuDisplayName: String {
+        switch self {
+        case .calendar: "Calendar"
+        case .messages: "Messages"
+        case .notes: "Notes"
+        }
+    }
+}
+
 /// Pure presentation rules for the start menu. Keeping user-visible state out
 /// of AppKit makes the important behavior testable without relying on window
 /// positions, font metrics, run-loop timing, or the current display size.
@@ -176,6 +239,51 @@ enum StartMenuPresentation {
             ],
             isGranted: true,
             grantedStatusLabel: "●  \(mappings.count) Ports"
+        )
+    }
+
+    /// Service Modes are user-visible trust choices, so the wording must say
+    /// what an enabled read exposes and must never present the mode as an
+    /// Apple permission or security entitlement.
+    static func omarchyLink(
+        modes: OmarchyLinkServiceModes,
+        availability: StartMenuOmarchyLinkAvailability
+    ) -> StartMenuOmarchyLinkPresentation {
+        if availability == .unavailable {
+            let lines = [
+                "Omarchy Link is unavailable because this VM has no valid Workspace identity.",
+                "Omarchy still starts and runs without it.",
+            ]
+            return StartMenuOmarchyLinkPresentation(
+                detail: lines.joined(separator: " "),
+                compactDetailLines: lines,
+                isGranted: false,
+                grantedStatusLabel: "\u{25cf}  0 On",
+                serviceActions: []
+            )
+        }
+
+        let exposure = "Turning on Read or Read & Write exposes that service\u{2019}s "
+            + "private data to every process in the trusted Owner session inside Omarchy."
+        let persistence = availability == .ephemeral
+            ? "Choices for this disposable VM apply to this run only and are not saved."
+            : "Choices freeze when Omarchy starts; a change applies to the next launch."
+        let boundary = "These are Try Omarchy choices, separate from what macOS allows this app to access."
+        let lines = [exposure, persistence, boundary]
+
+        let services: [OmarchyLinkMacService] = [.calendar, .messages, .notes]
+        let enabledCount = services.count { modes.mode(for: $0) != .off }
+        return StartMenuOmarchyLinkPresentation(
+            detail: lines.joined(separator: " "),
+            compactDetailLines: lines,
+            isGranted: enabledCount > 0,
+            grantedStatusLabel: "\u{25cf}  \(enabledCount) On",
+            serviceActions: services.map { service in
+                StartMenuOmarchyLinkServiceAction(
+                    service: service,
+                    title: "\(service.menuDisplayName): \(modes.mode(for: service).menuDisplayName)"
+                )
+            }
         )
     }
 

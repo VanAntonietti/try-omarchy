@@ -20,6 +20,36 @@ enum WorkspaceStorage {
         }
     }
 
+    /// The host-owned extended attribute the storage transaction writes on a
+    /// new Workspace directory. Its record is `v1:<uuid>:<binding>`.
+    static let linkWorkspaceIdentityAttribute = "dev.tryomarchy.workspace-identity"
+
+    /// Read-only preflight of the Link Workspace identity for launcher UI.
+    /// Missing, malformed, or substituted records yield nil, which disables
+    /// only Link. The shell repeats this validation under its workspace lock
+    /// before any launch, so this never authorizes access by itself.
+    static func linkWorkspaceIdentity(directory: String) -> OmarchyLinkWorkspaceIdentity? {
+        let length = getxattr(directory, linkWorkspaceIdentityAttribute, nil, 0, 0, XATTR_NOFOLLOW)
+        guard length > 0, length <= 512 else { return nil }
+        var buffer = [UInt8](repeating: 0, count: length)
+        guard getxattr(
+            directory,
+            linkWorkspaceIdentityAttribute,
+            &buffer,
+            buffer.count,
+            0,
+            XATTR_NOFOLLOW
+        ) == length,
+            let record = String(bytes: buffer, encoding: .utf8) else { return nil }
+        let components = record.split(separator: ":", maxSplits: 2, omittingEmptySubsequences: false)
+        guard components.count == 3,
+              components[0] == "v1",
+              let identity = OmarchyLinkWorkspaceIdentity(rawValue: String(components[1])),
+              let binding = try? binding(directory: directory),
+              record == "v1:\(identity.rawValue):\(binding)" else { return nil }
+        return identity
+    }
+
     static func binding(directory: String) throws -> String {
         let directoryURL = URL(fileURLWithPath: directory, isDirectory: true)
         let volume = try directoryURL.resourceValues(forKeys: [.volumeUUIDStringKey])

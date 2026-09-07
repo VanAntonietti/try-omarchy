@@ -68,8 +68,34 @@ New persistent Workspaces also receive a random, lowercase UUIDv4, distinct
 from the factory digest and storage path. It is the key for per-Workspace
 Service Modes, not a secret or an Apple permission grant. Factory Reset creates
 a different identity even with the same factory and folder; old identity-keyed
-choices must not be carried forward. Service Mode persistence/UI and the live
-Link channel are separate follow-up work (#7 and #9).
+choices must not be carried forward. The live Link channel is separate
+follow-up work (#9).
+
+### Omarchy Link Service Modes
+
+Per-Workspace Service Modes (Off, Read, or Read & Write for Calendar,
+Messages, and Notes) persist in launcher `UserDefaults`, keyed by the
+validated Workspace identity. Everything defaults to Off, and anything
+unrecognized — a malformed payload, a future schema, or an unknown mode value —
+loads as Off rather than a broader mode. A bounded number of recent Workspace
+entries is retained; a Factory Reset changes the identity, so the reset
+Workspace starts from all-Off regardless of old state.
+
+With `OMARCHY_LINK_DEVELOPMENT=1` the start menu shows a development-only
+Omarchy Link row that cycles each service's mode and states the trust
+consequence: enabling Read or Read & Write exposes that service's private data
+to every process in the trusted Owner session. The row presents Try Omarchy
+choices, never Apple permissions; released builds render no Link row. An
+invalid or missing Workspace identity shows the row as unavailable without
+mode choices and without blocking the VM.
+
+A Link Session receives one immutable Service Mode snapshot captured at
+launch (`OmarchyLinkServiceModePolicy.sessionModes`); changing preferences
+afterwards affects only the next launch. Ephemeral launches use explicit
+one-run choices held in memory and never written to the store, so they cannot
+persist to a later launch. Off advertises no Capability for that service, Read
+advertises no mutation Capability, and Read & Write proposals still pass the
+Review Interlock.
 
 The locked storage transaction writes one host-owned extended attribute,
 `dev.tryomarchy.workspace-identity`, on the mode-0700 Workspace directory. Its

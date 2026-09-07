@@ -107,6 +107,8 @@ final class StartMenuWindow: NSObject, NSWindowDelegate {
     private let savePortForwarding: ([PortForwardMapping]) -> String?
     private let immersiveMode: () -> Bool
     private let setImmersiveMode: (Bool) -> Void
+    private let omarchyLinkStatus: () -> StartMenuOmarchyLinkMenuState?
+    private let setOmarchyLinkMode: (OmarchyLinkMacService, OmarchyLinkServiceMode) -> Void
     private let launch: () -> Void
     private let canResetStorage: Bool
     private let storageLocation: () -> String?
@@ -186,6 +188,8 @@ final class StartMenuWindow: NSObject, NSWindowDelegate {
         savePortForwarding: @escaping ([PortForwardMapping]) -> String? = { _ in nil },
         immersiveMode: @escaping () -> Bool = { true },
         setImmersiveMode: @escaping (Bool) -> Void = { _ in },
+        omarchyLinkStatus: @escaping () -> StartMenuOmarchyLinkMenuState? = { nil },
+        setOmarchyLinkMode: @escaping (OmarchyLinkMacService, OmarchyLinkServiceMode) -> Void = { _, _ in },
         launch: @escaping () -> Void
     ) {
         self.accessibilityStatus = accessibilityStatus
@@ -210,6 +214,8 @@ final class StartMenuWindow: NSObject, NSWindowDelegate {
         self.savePortForwarding = savePortForwarding
         self.immersiveMode = immersiveMode
         self.setImmersiveMode = setImmersiveMode
+        self.omarchyLinkStatus = omarchyLinkStatus
+        self.setOmarchyLinkMode = setOmarchyLinkMode
         self.launch = launch
 
         window = NSWindow(
@@ -460,6 +466,33 @@ final class StartMenuWindow: NSObject, NSWindowDelegate {
         )
         let immersiveRow = immersiveSettingRow(isEnabled: immersiveMode())
 
+        // Omarchy Link is development-gated: without a menu state there is no
+        // row, so released builds keep today's menu exactly.
+        var omarchyLinkRow: NSView?
+        if let linkState = omarchyLinkStatus() {
+            let linkPresentation = StartMenuPresentation.omarchyLink(
+                modes: linkState.modes,
+                availability: linkState.availability
+            )
+            let linkActions: [(String, Selector)] = linkPresentation.serviceActions.map { action in
+                switch action.service {
+                case .calendar: (action.title, #selector(cycleOmarchyLinkCalendarMode))
+                case .messages: (action.title, #selector(cycleOmarchyLinkMessagesMode))
+                case .notes: (action.title, #selector(cycleOmarchyLinkNotesMode))
+                }
+            }
+            omarchyLinkRow = permissionRow(
+                symbolName: "link",
+                title: "Omarchy Link",
+                detail: linkPresentation.detail,
+                compactDetailLines: linkPresentation.compactDetailLines,
+                granted: linkPresentation.isGranted,
+                statusLabels: (linkPresentation.grantedStatusLabel, "\u{25cb}  Off"),
+                actions: linkActions,
+                minimumHeight: 100
+            )
+        }
+
         let storageStatus = storageLocationStatus()
         var storageRow: NSView?
         if let storagePath = storageLocation() {
@@ -516,6 +549,9 @@ final class StartMenuWindow: NSObject, NSWindowDelegate {
             permissionRowViews.append(storageRow)
         }
         permissionRowViews.append(contentsOf: [portForwardingRow, immersiveRow])
+        if let omarchyLinkRow {
+            permissionRowViews.append(omarchyLinkRow)
+        }
 
         var permissionRowsAndSeparators: [NSView] = []
         for (index, row) in permissionRowViews.enumerated() {
@@ -1217,6 +1253,25 @@ final class StartMenuWindow: NSObject, NSWindowDelegate {
         )
         portForwardingEditor = editor
         editor.beginSheet(for: window)
+    }
+
+    @objc private func cycleOmarchyLinkCalendarMode() {
+        cycleOmarchyLinkMode(.calendar)
+    }
+
+    @objc private func cycleOmarchyLinkMessagesMode() {
+        cycleOmarchyLinkMode(.messages)
+    }
+
+    @objc private func cycleOmarchyLinkNotesMode() {
+        cycleOmarchyLinkMode(.notes)
+    }
+
+    private func cycleOmarchyLinkMode(_ service: OmarchyLinkMacService) {
+        guard let linkState = omarchyLinkStatus(),
+              linkState.availability != .unavailable else { return }
+        setOmarchyLinkMode(service, linkState.modes.mode(for: service).nextMenuChoice)
+        render()
     }
 
     @objc private func changeImmersiveMode(_ sender: NSSwitch) {
