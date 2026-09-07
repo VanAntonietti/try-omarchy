@@ -81,6 +81,7 @@ pub struct GuestSession {
     request_id: String,
     client: ClientIdentity,
     supported_protocol: ProtocolVersion,
+    workspace_identity: Option<String>,
     state: GuestSessionState,
 }
 
@@ -94,12 +95,20 @@ impl GuestSession {
             request_id,
             client,
             supported_protocol,
+            workspace_identity: None,
             state: GuestSessionState::AwaitingHandshake,
         }
     }
 
+    /// Binds the hello to the launcher-fixed Workspace identity. Sessions
+    /// without one (development fixtures) omit the field entirely.
+    pub fn with_workspace_identity(mut self, workspace_identity: String) -> Self {
+        self.workspace_identity = Some(workspace_identity);
+        self
+    }
+
     pub fn hello_request(&self) -> Value {
-        json!({
+        let mut request = json!({
             "type": "request",
             "id": self.request_id,
             "method": "session.hello",
@@ -113,7 +122,11 @@ impl GuestSession {
                     "minor": self.supported_protocol.minor,
                 },
             },
-        })
+        });
+        if let Some(workspace_identity) = &self.workspace_identity {
+            request["params"]["workspaceIdentity"] = json!(workspace_identity);
+        }
+        request
     }
 
     pub fn accept_handshake(&mut self, response: &Value) -> &GuestSessionState {

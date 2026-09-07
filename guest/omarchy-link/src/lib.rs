@@ -1,4 +1,5 @@
 mod agenda;
+mod channel;
 mod mutation;
 mod peer;
 mod session;
@@ -17,6 +18,10 @@ pub use peer::{
     ProposalCalendar, RequestFailure, RequestFailureCode,
 };
 
+pub use channel::{
+    CHANNEL_DEVICE, ChannelError, channel_status_value, negotiate_link_session,
+    workspace_identity_from_command_line,
+};
 pub use session::{
     CapabilityName, ClientIdentity, GuestSession, GuestSessionState, NegotiatedSession,
     ProtocolVersion, SessionFailure, SessionFailureCode,

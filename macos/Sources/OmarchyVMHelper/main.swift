@@ -5,7 +5,7 @@ import Foundation
 private var terminationSignalSources: [DispatchSourceSignal] = []
 
 private func usage() -> Never {
-    fputs("Usage: omarchy-vm-helper --run-qemu [--ephemeral | --reset-storage | --reset-storage-only] [GUEST_DIR] | --workspace-binding DIRECTORY | --sync-storage PATH | --bridge-command-super QEMU_PID QMP_SOCKET | --bridge-native-audio QEMU_PID SOCKET ROUTE_DIRECTORY | --bridge-native-camera QEMU_PID SOCKET | --bridge-native-clipboard QEMU_PID SOCKET\n", stderr)
+    fputs("Usage: omarchy-vm-helper --run-qemu [--ephemeral | --reset-storage | --reset-storage-only] [GUEST_DIR] | --workspace-binding DIRECTORY | --sync-storage PATH | --bridge-command-super QEMU_PID QMP_SOCKET | --bridge-native-audio QEMU_PID SOCKET ROUTE_DIRECTORY | --bridge-native-camera QEMU_PID SOCKET | --bridge-native-clipboard QEMU_PID SOCKET | --link-session-modes WORKSPACE_IDENTITY | --bridge-omarchy-link QEMU_PID SOCKET WORKSPACE_IDENTITY CALENDAR_MODE MESSAGES_MODE NOTES_MODE\n", stderr)
     exit(64)
 }
 
@@ -101,6 +101,47 @@ do {
         fputs("[camera-bridge] The Mac camera is available to Omarchy on demand.\n", stderr)
         try bridge.run()
         exit(0)
+    }
+
+    if arguments.first == "--link-session-modes" {
+        guard arguments.count == 2 else { usage() }
+        print(try OmarchyLinkSessionModeSnapshot.capture(identity: arguments[1]))
+        exit(0)
+    }
+
+    if arguments.first == "--bridge-omarchy-link" {
+        guard arguments.count == 7,
+              let processIdentifier = Int32(arguments[1]),
+              processIdentifier > 1,
+              let workspaceIdentity = OmarchyLinkWorkspaceIdentity(rawValue: arguments[3]),
+              let serviceModes = OmarchyLinkSessionModeSnapshot.parse(
+                  calendar: arguments[4],
+                  messages: arguments[5],
+                  notes: arguments[6]
+              ) else { usage() }
+        let bridge = try OmarchyLinkChannelBridge(
+            targetPID: processIdentifier,
+            socketPath: arguments[2],
+            serviceModes: serviceModes,
+            workspaceIdentity: workspaceIdentity
+        )
+        for signalNumber in [SIGINT, SIGTERM] {
+            Darwin.signal(signalNumber, SIG_IGN)
+            let source = DispatchSource.makeSignalSource(
+                signal: signalNumber,
+                queue: .global(qos: .userInitiated)
+            )
+            source.setEventHandler { bridge.stop() }
+            source.resume()
+            terminationSignalSources.append(source)
+        }
+        fputs("[omarchy-link] The private Omarchy Link channel is attached to this Link Session.\n", stderr)
+        switch try bridge.run() {
+        case .endOfStream:
+            exit(0)
+        case .linkDisabled:
+            exit(OmarchyLinkChannelBridge.disabledExitStatus)
+        }
     }
 
     if arguments.first == "--bridge-command-super" {
