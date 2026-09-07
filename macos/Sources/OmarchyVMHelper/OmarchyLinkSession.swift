@@ -37,6 +37,7 @@ struct OmarchyLinkProtocolVersion: Codable, Equatable {
 enum OmarchyLinkCapability: String, CaseIterable, Equatable {
     case calendarList = "calendar.calendars.list"
     case calendarEventCreateProposal = "calendar.events.create.propose"
+    case calendarEventCreatePerform = "calendar.events.create.perform"
     case calendarEventList = "calendar.events.list"
     case messageConversationList = "messages.conversations.list"
     case messageSendProposal = "messages.send.propose"
@@ -48,6 +49,20 @@ enum OmarchyLinkCapability: String, CaseIterable, Equatable {
     case noteGet = "notes.get"
     case noteRecentList = "notes.recent.list"
     case noteSearch = "notes.search"
+}
+
+enum OmarchyLinkCalendarMutationPolicy {
+    case unavailable
+    case proposalOnly
+    case reviewedCreate
+
+    var capabilities: [OmarchyLinkCapability] {
+        switch self {
+        case .unavailable: []
+        case .proposalOnly: [.calendarEventCreateProposal]
+        case .reviewedCreate: [.calendarEventCreateProposal, .calendarEventCreatePerform]
+        }
+    }
 }
 
 struct OmarchyLinkNegotiatedSession: Equatable {
@@ -129,6 +144,7 @@ struct OmarchyLinkHostSession {
     private let serviceModes: OmarchyLinkServiceModes
     private let calendarAuthorization: OmarchyLinkCalendarAuthorizationState
     private let identityPolicy: IdentityPolicy
+    private let calendarMutationPolicy: OmarchyLinkCalendarMutationPolicy
     private(set) var status = OmarchyLinkHostSessionStatus.awaitingHandshake
 
     /// nil means the host could not validate Workspace state, not an opt-out.
@@ -137,10 +153,12 @@ struct OmarchyLinkHostSession {
     init(
         serviceModes: OmarchyLinkServiceModes,
         workspaceIdentity: OmarchyLinkWorkspaceIdentity?,
-        calendarAuthorization: OmarchyLinkCalendarAuthorizationState
+        calendarAuthorization: OmarchyLinkCalendarAuthorizationState,
+        calendarMutationPolicy: OmarchyLinkCalendarMutationPolicy = .proposalOnly
     ) {
         self.serviceModes = serviceModes
         self.calendarAuthorization = calendarAuthorization
+        self.calendarMutationPolicy = calendarMutationPolicy
         identityPolicy = .workspace(workspaceIdentity)
     }
 
@@ -154,6 +172,7 @@ struct OmarchyLinkHostSession {
         serviceModes = developmentServiceModes
         self.calendarAuthorization = calendarAuthorization
         identityPolicy = .developmentFixture
+        calendarMutationPolicy = .proposalOnly
     }
 
     mutating func receive(_ payload: Data) -> OmarchyLinkHostReply {
@@ -221,7 +240,8 @@ struct OmarchyLinkHostSession {
             ),
             capabilities: Self.capabilities(
                 allowedBy: serviceModes,
-                calendarAuthorization: calendarAuthorization
+                calendarAuthorization: calendarAuthorization,
+                calendarMutationPolicy: calendarMutationPolicy
             )
         )
         status = .available(negotiated)
@@ -253,7 +273,8 @@ struct OmarchyLinkHostSession {
 
     private static func capabilities(
         allowedBy modes: OmarchyLinkServiceModes,
-        calendarAuthorization: OmarchyLinkCalendarAuthorizationState
+        calendarAuthorization: OmarchyLinkCalendarAuthorizationState,
+        calendarMutationPolicy: OmarchyLinkCalendarMutationPolicy
     ) -> [OmarchyLinkCapability] {
         var capabilities: [OmarchyLinkCapability] = []
 
@@ -266,7 +287,7 @@ struct OmarchyLinkHostSession {
         if modes.calendar != .off, calendarAccessible {
             capabilities += [.calendarList, .calendarEventList]
             if modes.calendar == .readWrite {
-                capabilities.append(.calendarEventCreateProposal)
+                capabilities += calendarMutationPolicy.capabilities
             }
         }
         if modes.messages != .off {

@@ -1,6 +1,6 @@
 # Omarchy Link guest broker
 
-The compiled Owner-local broker/CLI carries bounded Calendar Queries over the private VM Link channel. Host Service Mode and EventKit grant jointly limit availability. All writes remain unavailable; the invented-data agenda and Mutation Proposal review remain separate development demos.
+The compiled Owner-local broker/CLI carries bounded Calendar Queries over the private VM Link channel. Host Service Mode and EventKit grant jointly limit availability. Writes remain unavailable by default. A separately developer-gated real Calendar create flow uses a broker-owned visible review; the invented-data demos remain separate.
 
 The dependency graph is exact-version locked and vendored. Tests therefore run without network access:
 
@@ -20,7 +20,7 @@ New/reset factory Workspaces enable `omarchy-link.service` only for the first pr
 
 `omarchy-link status` reports negotiated host Capabilities, a content-free Calendar revision, and `contentAllowed` (active, unlocked Owner graphical session). Missing logind state or a running Hyprlock fails closed. The service owns `$XDG_RUNTIME_DIR/omarchy-link/socket` with mode 0600 inside a validated owned 0700 directory. Other accounts cannot traverse it; guest root and compromised Owner processes are outside this boundary. The daemon refuses to replace existing sockets. systemd removes its runtime directory on stop, allowing a clean restart. For manual daemon runs, use a fresh private runtime directory each time.
 
-Local IPC is one length-prefixed JSON request/response per connection, bounded to 64 KiB and two-second read/write timeouts. `omarchy-link call` reads JSON only from stdin; no request body belongs in argv. Unknown methods and all writes return typed unavailability and are never replayed. The broker stores no content or Sync Metadata on disk, emits no request logs, and its service disables output and core dumps. Calendar responses travel only in memory and over private IPC. Up to eight local clients are served concurrently so a Query does not block lock-status checks. Queries have a one-second response deadline and are checked for lock state both before submission and before returning content; timeouts request cancellation, and disconnects never replay a Query.
+Local IPC is one length-prefixed JSON request/response per connection, bounded to 64 KiB and two-second read/write timeouts. `omarchy-link call` reads JSON only from stdin; no request body belongs in argv. Unknown methods and direct write execution return typed unavailability. The separately gated `calendar.create` workflow below can ask for visible review; it never accepts a client-supplied approval or replays a write. The broker stores no content or Sync Metadata on disk, emits no request logs, and its service disables output and core dumps. Calendar responses travel only in memory and over private IPC. Up to eight local clients are served concurrently so a Query does not block lock-status checks. Queries have a one-second response deadline and are checked for lock state both before submission and before returning content; timeouts request cancellation, and disconnects never replay a Query.
 
 For an isolated invented-data socket demo, use a fresh 0700 `XDG_RUNTIME_DIR` and run `OMARCHY_LINK_DEVELOPMENT=1 omarchy-link daemon --development-fake`. From the same runtime directory, `status` identifies the invented adapter without claiming host availability. Submit `{"method":"calendar.agenda","date":"2026-09-14","range":"seven-days"}` on `call` stdin. The fake adapter cannot be enabled by a client request.
 
@@ -34,9 +34,26 @@ Today and Next 7 days use local midnight boundaries and the guest's `/etc/localt
 
 The surface polls content-free status every 250 ms (plus bounded IPC/probe latency). On lock, inactive/unknown session state, Hyprlock, or channel loss, its content process exits, the window closes, and late results cannot reopen it. Unlock requires explicitly reopening the surface. Content-free Invalidations coalesce into at most one refresh per two seconds; a sixty-second fallback refresh covers date rollover. There is at most one outstanding agenda refresh and no persistent content cache. Production peers negotiate monotonic Query identifiers, retaining only a high-water mark on the host so normal periodic refreshes do not exhaust the development fixture's lifetime budget. Older hosts that do not acknowledge this additive extension retain the 1,023-Query limit. Dense results exceeding the 64 KiB local IPC budget report Calendar unavailability without truncating events; choose a narrower date range or calendar filter.
 
-Local read requests are `{"method":"calendar.calendars.list"}` and `{"method":"calendar.events.list","start":"2026-09-14T00:00:00Z","end":"2026-09-15T00:00:00Z","calendarIds":[]}`. Use the `call` command's stdin only; its stdout contains private data, so do not redirect it into logs. Unknown methods and writes remain unavailable. Test-only `OMARCHY_LINK_UNLOCKED_FILE` is honored exclusively by the explicitly gated development daemon.
+Local read requests are `{"method":"calendar.calendars.list"}` and `{"method":"calendar.events.list","start":"2026-09-14T00:00:00Z","end":"2026-09-15T00:00:00Z","calendarIds":[]}`. Use the `call` command's stdin only; its stdout contains private data, so do not redirect it into logs. Unknown methods and direct write execution remain unavailable. Test-only `OMARCHY_LINK_UNLOCKED_FILE` is honored exclusively by the explicitly gated development daemon.
 
 See [disposable-event verification](../../docs/calendar-agenda-verification.md) before release. Existing persistent disks are not upgraded or modified.
+
+## Developer-gated real Calendar create
+
+See [Calendar create setup and disposable verification](../../docs/calendar-create-verification.md).
+Both hosting Mac and guest broker must explicitly enable `OMARCHY_LINK_DEVELOPMENT=1`;
+Calendar must be Read & Write with full EventKit access. From an Owner graphical
+terminal, `omarchy-link create-calendar` reads the four-field JSON request from
+stdin, then the broker opens its own Quickshell Review Interlock. No body belongs
+in argv or files. The ordinary `call` CLI cannot approve or execute a proposal.
+The agenda UI stays unchanged and no bar layout is rewritten.
+
+Canonical content crosses only private pipes and a mode-0600 temporary Unix
+socket in a private runtime directory; the pathname contains no content.
+Lock, missing UI, rejection, and host channel loss abort review. Proposal IDs
+are one-shot, session-local, and expiring. After submission, unproven outcomes
+are explicitly uncertain, with no automatic replay. Per-session idempotency
+keys and reconciliation remain #13, so this flow is not release-ready.
 
 ## Development Calendar surface
 

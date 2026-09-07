@@ -14,6 +14,7 @@ import Foundation
 struct OmarchyLinkChannelHost {
     private var session: OmarchyLinkHostSession
     private let calendarProvider: (any OmarchyLinkCalendarProviding)?
+    private var mutations: OmarchyLinkCalendarMutations?
     private var decoder = OmarchyLinkFrameDecoder()
     private var requestIDs = Set<String>()
     private var lastMonotonicQueryID: UInt32?
@@ -25,14 +26,20 @@ struct OmarchyLinkChannelHost {
         serviceModes: OmarchyLinkServiceModes,
         workspaceIdentity: OmarchyLinkWorkspaceIdentity,
         calendarAuthorization: OmarchyLinkCalendarAuthorizationState,
-        calendarProvider: (any OmarchyLinkCalendarProviding)? = nil
+        calendarProvider: (any OmarchyLinkCalendarProviding)? = nil,
+        calendarCreator: (any OmarchyLinkCalendarCreating)? = nil,
+        developmentCreates: Bool = false
     ) {
         session = OmarchyLinkHostSession(
             serviceModes: serviceModes,
             workspaceIdentity: workspaceIdentity,
-            calendarAuthorization: calendarAuthorization
+            calendarAuthorization: calendarAuthorization,
+            calendarMutationPolicy: developmentCreates && calendarCreator != nil ? .reviewedCreate : .unavailable
         )
         self.calendarProvider = calendarProvider
+        if developmentCreates, let calendarCreator {
+            mutations = OmarchyLinkCalendarMutations(provider: calendarCreator)
+        }
     }
 
     var status: OmarchyLinkHostSessionStatus { session.status }
@@ -81,14 +88,14 @@ struct OmarchyLinkChannelHost {
 
         guard case .available = session.status else {
             let reply = try session.receive(payload).encodedMessage()
-            if case .available = session.status,
-               (envelope["params"] as? [String: Any])?["requestIdPolicy"] as? String == "monotonic-q" {
-                // Opt-in only: older clients retain the existing arbitrary-ID
-                // contract. A high-water mark replaces session-long ID storage.
-                lastMonotonicQueryID = 0
+            if case .available = session.status {
                 var response = try OmarchyLinkFrameCodec.decodeJSONObject(reply)
                 var result = response["result"] as? [String: Any] ?? [:]
-                result["requestIdPolicy"] = "monotonic-q"
+                if (envelope["params"] as? [String: Any])?["requestIdPolicy"] as? String == "monotonic-q" {
+                    // A high-water mark replaces session-long ID storage.
+                    lastMonotonicQueryID = 0
+                    result["requestIdPolicy"] = "monotonic-q"
+                }
                 response["result"] = result
                 return try OmarchyLinkFrameCodec.encodeJSONObject(response)
             }
@@ -105,6 +112,23 @@ struct OmarchyLinkChannelHost {
         }
         guard case .available(let negotiated) = session.status else {
             preconditionFailure("a negotiated session was checked above")
+        }
+        if method == OmarchyLinkCapability.calendarEventCreateProposal.rawValue,
+           negotiated.capabilities.contains(.calendarEventCreateProposal), mutations != nil {
+            guard let proposal = try? mutations?.propose(envelope["params"] as? [String: Any] ?? [:]) else {
+                return try serviceUnavailable(id)
+            }
+            return try calendarResponse(id, result: ["proposal": proposal.object])
+        }
+        if method == OmarchyLinkCapability.calendarEventCreatePerform.rawValue,
+           negotiated.capabilities.contains(.calendarEventCreatePerform), mutations != nil {
+            let parameters = envelope["params"] as? [String: Any] ?? [:]
+            guard Set(parameters.keys) == ["proposalId"],
+                  let proposalID = parameters["proposalId"] as? String else {
+                return try serviceUnavailable(id)
+            }
+            let outcome = mutations!.perform(proposalID)
+            return try calendarResponse(id, result: ["outcome": outcome.rawValue])
         }
         if method == OmarchyLinkCapability.calendarList.rawValue,
            negotiated.capabilities.contains(.calendarList) {
@@ -188,6 +212,7 @@ struct OmarchyLinkChannelHost {
         closed = true
         decoder = OmarchyLinkFrameDecoder()
         requestIDs.removeAll()
+        mutations = nil
     }
 
     private static func validID(_ id: String) -> Bool {
@@ -276,7 +301,9 @@ final class OmarchyLinkChannelBridge {
             serviceModes: serviceModes,
             workspaceIdentity: workspaceIdentity,
             calendarAuthorization: calendarAuthorization,
-            calendarProvider: calendarProvider
+            calendarProvider: calendarProvider,
+            calendarCreator: calendarProvider as? any OmarchyLinkCalendarCreating,
+            developmentCreates: ProcessInfo.processInfo.environment["OMARCHY_LINK_DEVELOPMENT"] == "1"
         )
         if calendarProvider != nil {
             observeCalendarChanges()

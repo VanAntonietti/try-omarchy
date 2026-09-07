@@ -1,8 +1,8 @@
-//! Owner-local IPC plus the guest end of the private host channel. No write
-//! execution is available; the channel carries negotiated Calendar Queries.
+//! Owner-local IPC and the private host channel. Calendar Queries are normal;
+//! developer-gated creation is mediated by a broker-owned visible review.
 use omarchy_link::{
-    CHANNEL_DEVICE, GuestPeer, GuestSessionState, MacService, PeerMessage, SessionFailure,
-    SessionFailureCode, channel_status_value, workspace_identity_from_command_line,
+    CHANNEL_DEVICE, CalendarCreateOutcome, GuestPeer, GuestSessionState, MacService, PeerMessage,
+    SessionFailure, SessionFailureCode, channel_status_value, workspace_identity_from_command_line,
 };
 use serde_json::{Value, json};
 use std::{
@@ -43,8 +43,8 @@ fn directory() -> io::Result<PathBuf> {
     private_directory(&root)?;
     Ok(root.join("omarchy-link"))
 }
-fn receive(stream: &mut UnixStream) -> io::Result<Value> {
-    stream.set_read_timeout(Some(Duration::from_secs(2)))?;
+fn receive(stream: &mut UnixStream, timeout: u64) -> io::Result<Value> {
+    stream.set_read_timeout(Some(Duration::from_secs(timeout)))?;
     let mut header = [0; 4];
     stream.read_exact(&mut header)?;
     let size = u32::from_be_bytes(header) as usize;
@@ -69,7 +69,14 @@ pub fn client(request: Value) -> io::Result<Value> {
     private_directory(&dir)?;
     let mut stream = UnixStream::connect(dir.join("socket"))?;
     send(&mut stream, &request)?;
-    receive(&mut stream)
+    receive(
+        &mut stream,
+        if request["method"] == "calendar.create" {
+            125
+        } else {
+            2
+        },
+    )
 }
 pub fn status() -> Value {
     client(json!({"method":"status"})).unwrap_or_else(|_| unavailable())
@@ -165,7 +172,7 @@ fn channel_failure(code: &str) -> GuestSessionState {
     })
 }
 
-/// Typed in-flight Queries for one host connection; never persisted or replayed.
+/// Typed in-flight requests for one host connection; never persisted or replayed.
 struct Connection {
     peer: GuestPeer,
     writer: ChannelTransport,
@@ -176,9 +183,21 @@ struct Link {
     state: Option<GuestSessionState>,
     connection: Option<Connection>,
     calendar_revision: u64,
+    generation: u64,
+    reviewing: bool,
 }
 
 fn query(link: &Arc<Mutex<Link>>, request: &Value, development: bool) -> Value {
+    exchange(link, request, development, None)
+}
+
+fn exchange(
+    link: &Arc<Mutex<Link>>,
+    request: &Value,
+    development: bool,
+    generation: Option<u64>,
+) -> Value {
+    let performing = request["method"] == "calendar.events.create.perform";
     if !crate::content_access::allowed(development) {
         return error("session.locked");
     }
@@ -188,6 +207,9 @@ fn query(link: &Arc<Mutex<Link>>, request: &Value, development: bool) -> Value {
         let Ok(mut link) = link.lock() else {
             return error("service.unavailable");
         };
+        if generation.is_some_and(|generation| generation != link.generation) {
+            return error("service.unavailable");
+        }
         let Some(connection) = link.connection.as_mut() else {
             return error("service.unavailable");
         };
@@ -206,6 +228,25 @@ fn query(link: &Arc<Mutex<Link>>, request: &Value, development: bool) -> Value {
                 };
                 connection.peer.list_events(start, end, &ids)
             }
+            Some("calendar.events.create.propose") => {
+                let (Some(title), Some(start), Some(end), Some(calendar)) = (
+                    request["title"].as_str(),
+                    request["startsAt"].as_str(),
+                    request["endsAt"].as_str(),
+                    request["calendarId"].as_str(),
+                ) else {
+                    return error("request.invalid");
+                };
+                connection
+                    .peer
+                    .propose_calendar_event(title, start, end, calendar)
+            }
+            Some("calendar.events.create.perform") => {
+                let Some(id) = request["proposalId"].as_str() else {
+                    return error("request.invalid");
+                };
+                connection.peer.perform_calendar_event(id)
+            }
             _ => return error("request.method_unavailable"),
         };
         let Ok((request_id, frame)) = prepared else {
@@ -213,16 +254,27 @@ fn query(link: &Arc<Mutex<Link>>, request: &Value, development: bool) -> Value {
         };
         id = request_id;
         if connection.writer.write_all(&frame).is_err() {
-            return error("service.unavailable");
+            link.connection = None;
+            return if performing {
+                create_outcome(CalendarCreateOutcome::Uncertain)
+            } else {
+                error("service.unavailable")
+            };
         }
         connection.pending.insert(id.clone(), sender);
     }
     let result = receiver
         .recv_timeout(Duration::from_millis(1000))
-        .unwrap_or_else(|_| error("request.timeout"));
+        .unwrap_or_else(|_| {
+            if performing {
+                create_outcome(CalendarCreateOutcome::Uncertain)
+            } else {
+                error("request.timeout")
+            }
+        });
     if let Ok(mut link) = link.lock() {
         if let Some(connection) = link.connection.as_mut() {
-            if connection.pending.remove(&id).is_some() {
+            if connection.pending.remove(&id).is_some() && !performing {
                 if let Ok(frame) = connection.peer.cancel(&id) {
                     let _ = connection.writer.write_all(&frame);
                 }
@@ -235,8 +287,75 @@ fn query(link: &Arc<Mutex<Link>>, request: &Value, development: bool) -> Value {
         error("session.locked")
     }
 }
+fn create_outcome(outcome: CalendarCreateOutcome) -> Value {
+    json!({"outcome": outcome})
+}
+
 fn error(code: &str) -> Value {
     json!({"error":{"code":code,"message":"Calendar content unavailable"}})
+}
+
+fn reviewed_create(link: &Arc<Mutex<Link>>, request: &Value, fixture: bool) -> Value {
+    if env::var("OMARCHY_LINK_DEVELOPMENT").as_deref() != Ok("1") {
+        return error("request.method_unavailable");
+    }
+    if !crate::content_access::allowed(fixture) {
+        return error("session.locked");
+    }
+    let generation;
+    {
+        let Ok(mut slot) = link.lock() else {
+            return error("service.unavailable");
+        };
+        let available = matches!(&slot.state, Some(GuestSessionState::Available(session))
+            if session.capabilities.iter().any(|c| c.as_str() == "calendar.events.create.perform"));
+        if slot.reviewing || !available {
+            return error("request.unavailable");
+        }
+        slot.reviewing = true;
+        generation = slot.generation;
+    }
+    let result = (|| {
+        let Some(parameters) = request.as_object() else {
+            return error("request.invalid");
+        };
+        if parameters.len() != 5 {
+            return error("request.invalid");
+        }
+        let mut proposal_request = request.clone();
+        proposal_request["method"] = json!("calendar.events.create.propose");
+        let proposed = exchange(link, &proposal_request, fixture, Some(generation));
+        let Some(proposal) = proposed.get("proposal") else {
+            return proposed;
+        };
+        let usable = || {
+            crate::content_access::allowed(fixture)
+                && link
+                    .lock()
+                    .is_ok_and(|slot| slot.generation == generation && slot.connection.is_some())
+        };
+        if !crate::review::approve(proposal, fixture, usable) {
+            return json!({"outcome":CalendarCreateOutcome::Failed, "reason":"review.not_approved"});
+        }
+        if !usable() {
+            return create_outcome(CalendarCreateOutcome::Failed);
+        }
+        let result = exchange(
+            link,
+            &json!({"method":"calendar.events.create.perform",
+            "proposalId":proposal["id"]}),
+            fixture,
+            Some(generation),
+        );
+        // Once submitted, a lost/invalid result or lock cannot prove no write.
+        let outcome = serde_json::from_value::<CalendarCreateOutcome>(result["outcome"].clone())
+            .unwrap_or(CalendarCreateOutcome::Uncertain);
+        create_outcome(outcome)
+    })();
+    if let Ok(mut slot) = link.lock() {
+        slot.reviewing = false;
+    }
+    result
 }
 
 fn channel_worker(link: Arc<Mutex<Link>>, development: bool) {
@@ -276,7 +395,9 @@ fn channel_worker(link: Arc<Mutex<Link>>, development: bool) {
             return;
         }
         {
-            link.lock().unwrap().connection = Some(connection);
+            let mut slot = link.lock().unwrap();
+            slot.generation = slot.generation.saturating_add(1);
+            slot.connection = Some(connection);
         }
         let mut chunk = [0_u8; 4096];
         let mut terminal = false;
@@ -313,6 +434,12 @@ fn channel_worker(link: Arc<Mutex<Link>>, development: bool) {
                     }
                     PeerMessage::Events { id, events } => {
                         deliver(&mut slot, &id, json!({"events":events}))
+                    }
+                    PeerMessage::MutationProposed { id, proposal } => {
+                        deliver(&mut slot, &id, json!({"proposal":proposal}))
+                    }
+                    PeerMessage::MutationPerformed { id, outcome } => {
+                        deliver(&mut slot, &id, json!({"outcome":outcome}))
                     }
                     PeerMessage::Failed { id, .. } => {
                         deliver(&mut slot, &id, error("service.unavailable"))
@@ -390,7 +517,7 @@ pub fn daemon(fake: bool) -> io::Result<()> {
 }
 
 fn serve_client(mut stream: UnixStream, link: &Arc<Mutex<Link>>, fake: bool) {
-    let Ok(request) = receive(&mut stream) else {
+    let Ok(request) = receive(&mut stream, 2) else {
         return;
     };
     let response = if request.get("method").and_then(Value::as_str) == Some("status") {
@@ -404,6 +531,8 @@ fn serve_client(mut stream: UnixStream, link: &Arc<Mutex<Link>>, fake: bool) {
         status["calendarRevision"] =
             json!(link.lock().map(|link| link.calendar_revision).unwrap_or(0));
         status
+    } else if request["method"] == "calendar.create" {
+        reviewed_create(link, &request, fake)
     } else if matches!(
         request["method"].as_str(),
         Some("calendar.calendars.list" | "calendar.events.list")

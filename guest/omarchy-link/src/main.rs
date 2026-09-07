@@ -1,5 +1,6 @@
 mod content_access;
 mod local;
+mod review;
 
 use omarchy_link::{
     AgendaRange, CalendarCreateRequest, DevelopmentAgendaBroker, DevelopmentMutationBroker,
@@ -14,7 +15,7 @@ use std::str::FromStr;
 
 fn usage() {
     eprintln!(
-        "usage: omarchy-link <daemon|call|status|demo-agenda --date YYYY-MM-DD --range today|seven-days [--calendar ID]|demo-create --title TITLE --start UTC --end UTC --calendar ID>"
+        "usage: omarchy-link <daemon|call|status|create-calendar (JSON on stdin, visible development review)|demo-agenda --date YYYY-MM-DD --range today|seven-days [--calendar ID]|demo-create --title TITLE --start UTC --end UTC --calendar ID>"
     );
 }
 
@@ -42,15 +43,47 @@ fn main() -> ExitCode {
                 }
             }
         }
+        Some("create-calendar") if arguments.next().is_none() => {
+            if env::var("OMARCHY_LINK_DEVELOPMENT").as_deref() != Ok("1")
+                || !io::stdout().is_terminal()
+                || env::var_os("WAYLAND_DISPLAY").is_none()
+            {
+                eprintln!("omarchy-link: visible development Calendar review required");
+                return ExitCode::from(77);
+            }
+            use std::io::Read;
+            let mut input = Vec::new();
+            if io::stdin().take(4097).read_to_end(&mut input).is_err() || input.len() > 4096 {
+                return ExitCode::from(64);
+            }
+            let Ok(mut request) = serde_json::from_slice::<serde_json::Value>(&input) else {
+                return ExitCode::from(64);
+            };
+            let Some(object) = request.as_object_mut() else {
+                return ExitCode::from(64);
+            };
+            if object.len() != 4 || object.contains_key("method") {
+                return ExitCode::from(64);
+            }
+            object.insert("method".into(), json!("calendar.create"));
+            let result = local::client(request).unwrap_or_else(|_| json!({"outcome":"uncertain"}));
+            // Only content-free outcomes, never echo the submitted title.
+            println!("{result}");
+            ExitCode::SUCCESS
+        }
         Some("call") if arguments.next().is_none() => {
             use std::io::Read;
             let mut input = Vec::new();
             if io::stdin().take(65537).read_to_end(&mut input).is_err() || input.len() > 65536 {
                 return ExitCode::from(64);
             }
-            let Ok(request) = serde_json::from_slice(&input) else {
+            let Ok(request) = serde_json::from_slice::<serde_json::Value>(&input) else {
                 return ExitCode::from(64);
             };
+            if request["method"] == "calendar.create" {
+                eprintln!("omarchy-link: use the visible create-calendar workflow");
+                return ExitCode::from(77);
+            }
             match local::client(request) {
                 Ok(response) => {
                     println!("{response}");

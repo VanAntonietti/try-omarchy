@@ -82,6 +82,14 @@ pub enum MacService {
     Notes,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CalendarCreateOutcome {
+    Succeeded,
+    Failed,
+    Uncertain,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PeerMessage {
     Invalidated(MacService),
@@ -99,6 +107,10 @@ pub enum PeerMessage {
         id: String,
         proposal: CalendarMutationProposal,
     },
+    MutationPerformed {
+        id: String,
+        outcome: CalendarCreateOutcome,
+    },
     Failed {
         id: String,
         failure: RequestFailure,
@@ -110,6 +122,7 @@ enum PendingQuery {
     Calendars,
     Events,
     CalendarCreateProposal,
+    CalendarCreatePerform,
 }
 
 /// A fake-data protocol peer, not a daemon or a connection to a Mac Service.
@@ -312,6 +325,40 @@ impl GuestPeer {
         Ok((id, frame))
     }
 
+    pub fn perform_calendar_event(
+        &mut self,
+        proposal_id: &str,
+    ) -> Result<(String, Vec<u8>), ProtocolError> {
+        if self.closed {
+            return Err(ProtocolError::ConnectionClosed);
+        }
+        let GuestSessionState::Available(session) = self.session.state() else {
+            return Err(ProtocolError::InvalidMessage);
+        };
+        if !session
+            .capabilities
+            .iter()
+            .any(|c| c.as_str() == "calendar.events.create.perform")
+        {
+            return Err(ProtocolError::CapabilityUnavailable);
+        }
+        if proposal_id.is_empty() || proposal_id.len() > 128 {
+            return Err(ProtocolError::InvalidMessage);
+        }
+        if self.pending.len() >= 32 || self.next_id >= self.request_id_limit {
+            return Err(ProtocolError::ResourceLimit);
+        }
+        let id = format!("q{}", self.next_id);
+        self.next_id += 1;
+        let frame = encode_json(&json!({
+            "type":"request", "id":id, "method":"calendar.events.create.perform",
+            "params":{"proposalId":proposal_id}
+        }))?;
+        self.pending
+            .insert(id.clone(), PendingQuery::CalendarCreatePerform);
+        Ok((id, frame))
+    }
+
     pub fn cancel(&self, id: &str) -> Result<Vec<u8>, ProtocolError> {
         if !self.pending.contains_key(id) {
             return Err(ProtocolError::InvalidMessage);
@@ -437,6 +484,11 @@ impl GuestPeer {
                             id,
                             events: result.events,
                         }
+                    }
+                    PendingQuery::CalendarCreatePerform => {
+                        let outcome = serde_json::from_value(result["outcome"].clone())
+                            .map_err(|_| ProtocolError::InvalidMessage)?;
+                        PeerMessage::MutationPerformed { id, outcome }
                     }
                     PendingQuery::CalendarCreateProposal => {
                         let result: MutationProposalResult = serde_json::from_value(result)

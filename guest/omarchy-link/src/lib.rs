@@ -14,8 +14,8 @@ pub use mutation::{
     ReviewUiState,
 };
 pub use peer::{
-    Calendar, CalendarEvent, CalendarMutationProposal, GuestPeer, MacService, PeerMessage,
-    ProposalCalendar, RequestFailure, RequestFailureCode,
+    Calendar, CalendarCreateOutcome, CalendarEvent, CalendarMutationProposal, GuestPeer,
+    MacService, PeerMessage, ProposalCalendar, RequestFailure, RequestFailureCode,
 };
 
 pub use channel::{

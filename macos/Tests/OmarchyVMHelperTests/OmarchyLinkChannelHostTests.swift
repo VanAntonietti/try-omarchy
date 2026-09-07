@@ -56,7 +56,6 @@ struct OmarchyLinkChannelHostTests {
         #expect(
             result["capabilities"] as? [String] == [
                 "calendar.calendars.list",
-                "calendar.events.create.propose",
                 "calendar.events.list",
                 "messages.conversations.list",
                 "messages.thread.list",
@@ -68,6 +67,8 @@ struct OmarchyLinkChannelHostTests {
             return
         }
         #expect(negotiated.protocolVersion == OmarchyLinkProtocolVersion(major: 1, minor: 0))
+        // No developer gate or creating adapter: status and wire both expose reads only.
+        #expect(negotiated.capabilities.map(\.rawValue) == result["capabilities"] as? [String])
     }
 
     @Test("a newer compatible client negotiates down to the host minor version")

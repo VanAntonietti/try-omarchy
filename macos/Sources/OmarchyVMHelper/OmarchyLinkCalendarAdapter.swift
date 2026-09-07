@@ -110,11 +110,36 @@ struct InventedOmarchyLinkCalendarAdapter: OmarchyLinkCalendarProviding {
 /// jointly allow Calendar Capabilities, and it deliberately contains no
 /// permission-request API: reading through an unauthorized store never
 /// prompts.
-final class EventKitOmarchyLinkCalendarAdapter: OmarchyLinkCalendarProviding {
+final class EventKitOmarchyLinkCalendarAdapter: OmarchyLinkCalendarProviding, OmarchyLinkCalendarCreating {
     private let eventStore: EKEventStore
 
     init(eventStore: EKEventStore) {
         self.eventStore = eventStore
+    }
+
+    func writableCalendars() throws -> [OmarchyLinkCalendar] {
+        guard OmarchyLinkCalendarAccessPreflight.authorizationState() == .authorized else {
+            throw OmarchyLinkProtocolError.invalidMessage
+        }
+        return eventStore.calendars(for: .event)
+            .filter(\.allowsContentModifications)
+            .map { OmarchyLinkCalendar(id: $0.calendarIdentifier, title: $0.title) }
+    }
+
+    func create(_ proposal: OmarchyLinkCalendarCreate) throws {
+        guard OmarchyLinkCalendarAccessPreflight.authorizationState() == .authorized,
+              let calendar = eventStore.calendar(withIdentifier: proposal.calendar.id),
+              calendar.allowsContentModifications,
+              calendar.title == proposal.calendar.title else {
+            throw OmarchyLinkProtocolError.invalidMessage
+        }
+        let event = EKEvent(eventStore: eventStore)
+        event.calendar = calendar
+        event.title = proposal.title
+        event.startDate = proposal.startDate
+        event.endDate = proposal.endDate
+        event.isAllDay = false
+        try eventStore.save(event, span: .thisEvent, commit: true)
     }
 
     func calendars() -> [OmarchyLinkCalendar] {
