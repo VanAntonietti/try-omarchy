@@ -128,7 +128,10 @@ struct StartMenuWindowWidthTests {
         content.layoutSubtreeIfNeeded()
         #expect(!menu.window.isVisible)
         #expect(menu.window.frame.width == 600)
-        #expect(content.bounds.width == 600)
+        // Full parallel runs can give AppKit's content view one extra point
+        // even while the window stays exactly 600pt wide (issue #30). Allow
+        // only that bounded variation; keep window and containment checks intact.
+        #expect(abs(content.bounds.width - 600) <= 1)
 
         let row = try #require(
             descendant(withIdentifier: "permission-row-externaldrive", in: content)
