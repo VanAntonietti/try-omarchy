@@ -44,8 +44,24 @@ fn missing_review_ui_performs_nothing() {
     exercise("missing-ui");
 }
 #[test]
-fn disconnect_after_submission_reports_uncertainty_without_replay() {
+fn disconnect_before_create_reports_uncertainty_without_replay() {
     exercise("disconnect");
+}
+#[test]
+fn disconnect_after_create_does_not_replay_on_a_fresh_connection() {
+    exercise("disconnect-after-create");
+}
+#[test]
+fn uncertainty_requires_a_fresh_proposal_and_review() {
+    exercise("uncertain-retry");
+}
+#[test]
+fn conflict_requires_a_fresh_proposal_and_review() {
+    exercise("conflict-retry");
+}
+#[test]
+fn a_late_result_never_authorizes_a_retry() {
+    exercise("late-result");
 }
 #[test]
 fn disconnect_during_review_performs_nothing() {
@@ -152,19 +168,67 @@ fn exercise(scenario: &str) {
                     host.shutdown(std::net::Shutdown::Both).unwrap();
                 }
             }
-            if matches!(scenario, "approve" | "disconnect") {
+            if matches!(
+                scenario,
+                "approve"
+                    | "disconnect"
+                    | "disconnect-after-create"
+                    | "uncertain-retry"
+                    | "conflict-retry"
+                    | "late-result"
+            ) {
                 let perform = receive(&mut host);
                 assert_eq!(perform["method"], "calendar.events.create.perform");
                 assert_eq!(perform["params"], json!({"proposalId":"one-shot"}));
-                if scenario == "disconnect" {
+                if matches!(scenario, "disconnect" | "disconnect-after-create") {
+                    // Both no-effect and committed-effect host failures have
+                    // identical wire evidence: no result can prove either one.
+                    let created = scenario == "disconnect-after-create";
                     host.shutdown(std::net::Shutdown::Both).unwrap();
                     assert_eq!(result.join().unwrap()["outcome"], "uncertain");
-                } else {
+                    if created {
+                        let deadline = Instant::now() + Duration::from_secs(5);
+                        host = loop {
+                            match listener.accept() {
+                                Ok((stream, _)) => break stream,
+                                Err(_) if Instant::now() < deadline => {
+                                    thread::sleep(Duration::from_millis(10))
+                                }
+                                Err(error) => panic!("{error}"),
+                            }
+                        };
+                        host.set_nonblocking(false).unwrap();
+                        let hello = receive(&mut host);
+                        assert_eq!(hello["method"], "session.hello");
+                        send(
+                            &mut host,
+                            json!({"type":"response", "id":hello["id"], "result":{
+                                "protocol":{"major":1,"minor":0}, "server":{"name":"invented","version":"1"},
+                                "capabilities":["calendar.events.create.propose","calendar.events.create.perform"]
+                            }}),
+                        );
+                        while call(json!({"method":"status"}))["available"] != true {
+                            assert!(Instant::now() < deadline);
+                            thread::sleep(Duration::from_millis(10));
+                        }
+                    }
+                } else if scenario == "late-result" {
+                    assert_eq!(result.join().unwrap()["outcome"], "uncertain");
                     send(
                         &mut host,
                         json!({"type":"response","id":perform["id"],"result":{"outcome":"succeeded"}}),
                     );
-                    assert_eq!(result.join().unwrap()["outcome"], "succeeded");
+                } else {
+                    let outcome = match scenario {
+                        "uncertain-retry" => "uncertain",
+                        "conflict-retry" => "failed",
+                        _ => "succeeded",
+                    };
+                    send(
+                        &mut host,
+                        json!({"type":"response","id":perform["id"],"result":{"outcome":outcome}}),
+                    );
+                    assert_eq!(result.join().unwrap()["outcome"], outcome);
                 }
             } else {
                 assert_eq!(result.join().unwrap()["outcome"], "failed");
@@ -176,6 +240,35 @@ fn exercise(scenario: &str) {
                 assert!(!matches!(host.read(&mut byte), Ok(1)));
             }
         });
+        if matches!(
+            scenario,
+            "uncertain-retry" | "conflict-retry" | "late-result" | "disconnect-after-create"
+        ) {
+            // A live (or freshly negotiated) channel must carry no automatic
+            // perform. An explicit retry starts with canonicalization again.
+            host.set_read_timeout(Some(Duration::from_millis(100)))
+                .unwrap();
+            let mut byte = [0];
+            assert!(!matches!(host.read(&mut byte), Ok(1)));
+            fs::write(root.join("review"), "#!/bin/sh\nexit 1\n").unwrap();
+            thread::scope(|scope| {
+                let retry = scope.spawn(|| call(request.clone()));
+                let proposed = receive(&mut host);
+                assert_eq!(proposed["method"], "calendar.events.create.propose");
+                send(
+                    &mut host,
+                    json!({"type":"response","id":proposed["id"],"result":{"proposal":{
+                        "id":"fresh-review", "service":"calendar", "operation":"event.create", "title":"Invented canonical retry",
+                        "startsAt":"2026-09-14T09:00:00Z", "endsAt":"2026-09-14T10:00:00Z",
+                        "calendar":{"id":"invented","title":"Invented calendar"}
+                    }}}),
+                );
+                assert_eq!(retry.join().unwrap()["reason"], "review.not_approved");
+            });
+            host.set_read_timeout(Some(Duration::from_millis(100)))
+                .unwrap();
+            assert!(!matches!(host.read(&mut byte), Ok(1)));
+        }
         fs::write(root.join("unlocked"), "no").unwrap();
         assert_eq!(call(request)["error"]["code"], "session.locked");
     });

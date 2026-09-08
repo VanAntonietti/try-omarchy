@@ -1,6 +1,6 @@
 # Omarchy Link guest broker
 
-The compiled Owner-local broker/CLI carries bounded Calendar Queries over the private VM Link channel. Host Service Mode and EventKit grant jointly limit availability. Writes remain unavailable by default. A separately developer-gated real Calendar create flow uses a broker-owned visible review; the invented-data demos remain separate.
+The compiled Owner-local broker/CLI carries bounded Calendar Queries over the private VM Link channel. Host Service Mode and EventKit grant jointly limit availability. Writes remain unavailable by default. The opt-in real Calendar create flow uses a broker-owned visible review; the invented-data demos remain separate.
 
 The dependency graph is exact-version locked and vendored. Tests therefore run without network access:
 
@@ -20,7 +20,7 @@ New/reset factory Workspaces enable `omarchy-link.service` only for the first pr
 
 `omarchy-link status` reports negotiated host Capabilities, a content-free Calendar revision, and `contentAllowed` (active, unlocked Owner graphical session). Missing logind state or a running Hyprlock fails closed. The service owns `$XDG_RUNTIME_DIR/omarchy-link/socket` with mode 0600 inside a validated owned 0700 directory. Other accounts cannot traverse it; guest root and compromised Owner processes are outside this boundary. The daemon refuses to replace existing sockets. systemd removes its runtime directory on stop, allowing a clean restart. For manual daemon runs, use a fresh private runtime directory each time.
 
-Local IPC is one length-prefixed JSON request/response per connection, bounded to 64 KiB and two-second read/write timeouts. `omarchy-link call` reads JSON only from stdin; no request body belongs in argv. Unknown methods and direct write execution return typed unavailability. The separately gated `calendar.create` workflow below can ask for visible review; it never accepts a client-supplied approval or replays a write. The broker stores no content or Sync Metadata on disk, emits no request logs, and its service disables output and core dumps. Calendar responses travel only in memory and over private IPC. Up to eight local clients are served concurrently so a Query does not block lock-status checks. Queries have a one-second response deadline and are checked for lock state both before submission and before returning content; timeouts request cancellation, and disconnects never replay a Query.
+Local IPC is one length-prefixed JSON request/response per connection, bounded to 64 KiB and two-second read/write timeouts. `omarchy-link call` reads JSON only from stdin; no request body belongs in argv. Unknown methods and direct write execution return typed unavailability. The `calendar.create` workflow below can ask for visible review; it never accepts a client-supplied approval or replays a write. The broker stores no content or Sync Metadata on disk, emits no request logs, and its service disables output and core dumps. Calendar responses travel only in memory and over private IPC. Up to eight local clients are served concurrently so a Query does not block lock-status checks. Queries have a one-second response deadline and are checked for lock state both before submission and before returning content; timeouts request cancellation, and disconnects never replay a Query.
 
 For an isolated invented-data socket demo, use a fresh 0700 `XDG_RUNTIME_DIR` and run `OMARCHY_LINK_DEVELOPMENT=1 omarchy-link daemon --development-fake`. From the same runtime directory, `status` identifies the invented adapter without claiming host availability. Submit `{"method":"calendar.agenda","date":"2026-09-14","range":"seven-days"}` on `call` stdin. The fake adapter cannot be enabled by a client request.
 
@@ -38,11 +38,11 @@ Local read requests are `{"method":"calendar.calendars.list"}` and `{"method":"c
 
 See [disposable-event verification](../../docs/calendar-agenda-verification.md) before release. Existing persistent disks are not upgraded or modified.
 
-## Developer-gated real Calendar create
+## Opt-in real Calendar create
 
 See [Calendar create setup and disposable verification](../../docs/calendar-create-verification.md).
-Both hosting Mac and guest broker must explicitly enable `OMARCHY_LINK_DEVELOPMENT=1`;
-Calendar must be Read & Write with full EventKit access. From an Owner graphical
+No development flag is required on either side. Calendar must be Read & Write
+with full EventKit access. From an Owner graphical
 terminal, `omarchy-link create-calendar` reads the four-field JSON request from
 stdin, then the broker opens its own Quickshell Review Interlock. No body belongs
 in argv or files. The ordinary `call` CLI cannot approve or execute a proposal.
@@ -51,9 +51,13 @@ The agenda UI stays unchanged and no bar layout is rewritten.
 Canonical content crosses only private pipes and a mode-0600 temporary Unix
 socket in a private runtime directory; the pathname contains no content.
 Lock, missing UI, rejection, and host channel loss abort review. Proposal IDs
-are one-shot, session-local, and expiring. After submission, unproven outcomes
-are explicitly uncertain, with no automatic replay. Per-session idempotency
-keys and reconciliation remain #13, so this flow is not release-ready.
+are session-local, expiring idempotency keys: repeating an accepted key never
+saves again. Only exact EventKit identifier evidence can reconcile an uncertain
+save; otherwise it stays explicitly uncertain, with no automatic replay.
+Completed outcomes retain only bounded, in-memory IDs/status, never content.
+Every user retry after uncertainty or conflict obtains a fresh canonical proposal
+and visible review. A fresh session cannot execute old proposals or prove that
+an earlier uncertain write did not happen; inspect Calendar before retrying.
 
 ## Development Calendar surface
 

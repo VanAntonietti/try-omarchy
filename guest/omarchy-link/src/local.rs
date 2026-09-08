@@ -1,5 +1,5 @@
 //! Owner-local IPC and the private host channel. Calendar Queries are normal;
-//! developer-gated creation is mediated by a broker-owned visible review.
+//! opt-in creation is mediated by a broker-owned visible review.
 use omarchy_link::{
     CHANNEL_DEVICE, CalendarCreateOutcome, GuestPeer, GuestSessionState, MacService, PeerMessage,
     SessionFailure, SessionFailureCode, channel_status_value, workspace_identity_from_command_line,
@@ -296,9 +296,6 @@ fn error(code: &str) -> Value {
 }
 
 fn reviewed_create(link: &Arc<Mutex<Link>>, request: &Value, fixture: bool) -> Value {
-    if env::var("OMARCHY_LINK_DEVELOPMENT").as_deref() != Ok("1") {
-        return error("request.method_unavailable");
-    }
     if !crate::content_access::allowed(fixture) {
         return error("session.locked");
     }

@@ -5,8 +5,8 @@ import Testing
 @Suite("Start menu Omarchy Link row", .serialized)
 @MainActor
 struct StartMenuOmarchyLinkRowTests {
-    @Test("released builds render no Omarchy Link row at all")
-    func hiddenWithoutDevelopmentState() {
+    @Test("a window without a Link state provider omits the row")
+    func hiddenWithoutStateProvider() {
         _ = NSApplication.shared
         let menu = makeMenu(linkState: { nil }, setMode: { _, _ in })
         menu.prepareForPresentation(visibleFrame: NSRect(x: 0, y: 0, width: 1440, height: 900))
@@ -39,7 +39,7 @@ struct StartMenuOmarchyLinkRowTests {
 
         let content = try #require(menu.window.contentView)
         let calendarButton = try #require(
-            descendant(withIdentifier: "permission-action-link-0", in: content) as? NSButton
+            descendant(withIdentifier: "permission-action-link", in: content) as? NSButton
         )
         #expect(calendarButton.title == "Calendar: Off")
 
@@ -50,13 +50,10 @@ struct StartMenuOmarchyLinkRowTests {
         #expect(recorded.first?.1 == .read)
         let rerendered = try #require(menu.window.contentView)
         let updatedButton = try #require(
-            descendant(withIdentifier: "permission-action-link-0", in: rerendered) as? NSButton
+            descendant(withIdentifier: "permission-action-link", in: rerendered) as? NSButton
         )
         #expect(updatedButton.title == "Calendar: Read")
-        let messagesButton = try #require(
-            descendant(withIdentifier: "permission-action-link-1", in: rerendered) as? NSButton
-        )
-        #expect(messagesButton.title == "Messages: Off")
+        #expect(descendant(withIdentifier: "permission-action-link-1", in: rerendered) == nil)
     }
 
     @Test("an unavailable Link renders no mode choices")
@@ -98,13 +95,13 @@ struct StartMenuOmarchyLinkRowTests {
         defer { menu.dismiss() }
 
         let content = try #require(menu.window.contentView)
-        // The three Service Mode buttons stay, and one remediation button follows.
+        // The Calendar Service Mode button stays, and remediation follows.
         let calendarButton = try #require(
             descendant(withIdentifier: "permission-action-link-0", in: content) as? NSButton
         )
         #expect(calendarButton.title == "Calendar: Read")
         let remediationButton = try #require(
-            descendant(withIdentifier: "permission-action-link-3", in: content) as? NSButton
+            descendant(withIdentifier: "permission-action-link-1", in: content) as? NSButton
         )
         #expect(remediationButton.title == "Open Settings")
     }

@@ -112,6 +112,8 @@ struct InventedOmarchyLinkCalendarAdapter: OmarchyLinkCalendarProviding {
 /// prompts.
 final class EventKitOmarchyLinkCalendarAdapter: OmarchyLinkCalendarProviding, OmarchyLinkCalendarCreating {
     private let eventStore: EKEventStore
+    // Only identifiers from uncertain saves, never proposal/event content.
+    private var uncertainEventIDs: [String: String] = [:]
 
     init(eventStore: EKEventStore) {
         self.eventStore = eventStore
@@ -139,7 +141,25 @@ final class EventKitOmarchyLinkCalendarAdapter: OmarchyLinkCalendarProviding, Om
         event.startDate = proposal.startDate
         event.endDate = proposal.endDate
         event.isAllDay = false
-        try eventStore.save(event, span: .thisEvent, commit: true)
+        do {
+            try eventStore.save(event, span: .thisEvent, commit: true)
+        } catch {
+            if let identifier = event.eventIdentifier, !identifier.isEmpty,
+               uncertainEventIDs.count < 1024 {
+                uncertainEventIDs[proposal.id] = identifier
+            }
+            throw error
+        }
+    }
+
+    func confirmsCreate(_ proposalID: String) -> Bool {
+        guard OmarchyLinkCalendarAccessPreflight.authorizationState() == .authorized,
+              let identifier = uncertainEventIDs[proposalID] else { return false }
+        // A fresh store avoids treating the failed save's in-memory EKEvent as
+        // persistence evidence. Never search by title/time or issue another save.
+        guard EKEventStore().event(withIdentifier: identifier) != nil else { return false }
+        uncertainEventIDs.removeValue(forKey: proposalID)
+        return true
     }
 
     func calendars() -> [OmarchyLinkCalendar] {

@@ -1,23 +1,24 @@
-# Developer-gated Calendar creation (#12)
+# Opt-in Calendar creation
 
-This is **not a release-ready write feature**. #13 owns per-session idempotency
-keys, reconciliation, and removing the development gate. Use only disposable
-new/reset Workspaces and invented events. Existing disks are not migrated.
-The normal Calendar agenda remains read-only.
+Core + Calendar is available without a development flag for **new/reset
+Workspaces** built with the current guest image. Existing persistent disks are
+not migrated; app updates do not inject a new broker into them. Ephemeral runs
+have no Link channel. The normal Calendar agenda remains read-only; creation
+uses the separate visible workflow below. Use disposable calendars and invented
+events for verification.
 
 ## Enable and use
 
-1. Launch the hosting Mac app/helper with `OMARCHY_LINK_DEVELOPMENT=1` in its
-   environment. Choose Calendar **Read & Write**, grant full Calendar access
-   in the visible Mac start menu, and relaunch the Workspace. Off, Read, and
-   a missing grant cannot create; the guest cannot request an Apple prompt.
-2. In the Owner's graphical guest terminal, enable the guest broker gate for
-   this run (no user data goes into these commands):
+1. Launch the hosting Mac app normally. For a new/reset Workspace, first start
+   it once to provision its identity, then shut it down. In the Mac start menu,
+   choose Calendar **Read & Write**, use **Allow Calendar…** to grant full
+   Calendar access, and start the Workspace again. Off, Read, and a missing
+   grant cannot create; the guest cannot request an Apple prompt. Denied access
+   is remediated in System Settings > Privacy & Security > Calendars. A grant
+   does not widen a Service Mode, and a reset returns every mode to Off.
+2. In the Owner's graphical guest terminal, check the normally enabled broker:
 
    ```sh
-   export OMARCHY_LINK_DEVELOPMENT=1
-   systemctl --user import-environment OMARCHY_LINK_DEVELOPMENT WAYLAND_DISPLAY
-   systemctl --user restart omarchy-link.service
    omarchy-link status
    ```
 
@@ -54,10 +55,35 @@ compromised Owner or guest root. Enabling a Mac Service trusts the Owner session
 The review has a 110-second deadline; host proposals expire after 120 seconds
 and at most 32 are held in memory. Only one guest review is active at a time.
 Creation consumes a proposal before EventKit. Changed/unwritable destinations
-fail without a save. A save exception or lost execution result is uncertain.
-Neither broker nor host automatically replays a create. Any retry starts with
-new input, a new canonical proposal, and new visible review; inspect Calendar
-first after uncertainty to avoid manually making a duplicate.
+fail without a save. A save exception is reconciled only if EventKit supplied an exact event identifier
+and a fresh store can find that event. No title/time matching or second save is
+used; absent evidence, revoked access, or a lost execution result stays explicitly
+`uncertain`. Neither broker nor host automatically replays a create.
+
+The host-issued proposal ID is the per-session idempotency key. Repeating an
+accepted key returns its recorded outcome (or positively reconciled success),
+never another save. Wire request IDs must still be fresh. At most 1,024 completed
+or reserved outcomes are retained in memory; exhaustion refuses new proposals
+without evicting accepted keys or disabling reads. Only IDs and outcomes remain
+after execution, not titles or event content. Pending proposals and outcome
+metadata are discarded when the host channel ends; they are not persisted or
+transferred to a restarted bridge. An old proposal cannot execute in a fresh
+session. This does **not** prove an earlier uncertain write never happened.
+
+Any user retry after uncertainty or conflict starts with a new canonical proposal
+and new visible review; inspect Calendar first to avoid manually making a
+duplicate. Do not treat a new session as permission to retry silently.
+
+## Privacy and trust
+
+Enabling Calendar Read or Read & Write exposes private Calendar data to **every
+process in the trusted Owner session**, not just this UI. The Review Interlock
+is mandatory for supported writes, but does not defend against compromised
+same-user or root guest code. Lock or missing graphical-session state fails
+closed. Try Omarchy keeps Calendar content in memory/private IPC only, with no
+content cache, request-body logging, or proposal files; the intended created
+event is of course saved in Calendar. Do not redirect CLI read results to logs.
+Only content-free status and bounded, in-memory Sync Metadata are retained.
 
 ## Disposable verification (manual, not replaced by automated tests)
 
@@ -71,17 +97,22 @@ first after uncertainty to avoid manually making a duplicate.
   no event is created. A rename also requires a new proposal.
 - Stop the host bridge during review: no execution. Stop it after approval:
   report uncertainty when a result cannot be proven; never replay on reconnect.
-- Repeat with Off, Read, denied/revoked EventKit, no guest gate, missing display,
-  and headless CLI output: no write. Other services and the VM stay usable.
+- Verify creation works with no development variable in either process. Repeat
+  with Off, Read, denied/revoked EventKit, missing display, and headless CLI
+  output: no write. The VM stays usable.
 - Check that the service, renderer, and launcher logs contain no invented
   titles, no content files were created, and no bar layout was changed.
-- Delete disposable events/calendars, unset the guest development variable with
-  `systemctl --user unset-environment OMARCHY_LINK_DEVELOPMENT`, restart the
-  broker, and restart the Mac app without the development flag.
+- Retry after conflict or uncertainty: require a fresh canonical review. Reject
+  that review and confirm no second event appears. Start a fresh Link Session
+  and confirm no old create is replayed.
+- Delete disposable events/calendars and return Calendar to Off for the next
+  launch.
 
 Record only platform versions and pass/fail, never personal Calendar payloads.
-Automated Swift fake-store tests cover canonicalization, bounds, mode/gate
-policy, changed destinations, one-shot execution, and uncertain saves. Rust
-private-channel tests cover review, lock, missing UI, disconnect, and outcomes;
+Automated Swift fake-store tests cover canonicalization, bounds, mode/grant
+policy, changed destinations, duplicate suppression, uncertainty/reconciliation,
+discarded results, and fresh sessions. Rust private-channel tests cover fresh
+review after conflict/uncertainty, late results, reconnect without replay, lock,
+missing UI, and no-flag CLI availability;
 Python tests exercise the actual private review pipe with an invented renderer.
 Real EventKit writes and Quickshell/Hyprlock behavior still require this manual run.

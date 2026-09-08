@@ -1,6 +1,6 @@
-# Omarchy Link protocol v1 scaffold
+# Omarchy Link protocol v1
 
-This directory holds implementation-neutral fixtures shared by the Swift host and Rust guest tests. It is evidence for a design proposal, not yet a supported release contract.
+This directory holds implementation-neutral fixtures shared by the Swift host and Rust guest tests. Core + Calendar is an opt-in release for new/reset Workspaces; the broader invented-data fixture capabilities are not all production services.
 
 A frame is a four-byte unsigned big-endian payload length followed by one UTF-8 JSON object. Empty payloads and payloads larger than 4 MiB are rejected before JSON dispatch. The length counts bytes, not Unicode scalar values or characters.
 
@@ -29,7 +29,7 @@ Workspace.
 
 The host derives advertised Capabilities from its launch-fixed Service Modes. Off advertises none, Read advertises only named queries, and Read & Write adds only named Mutation Proposal operations. Calendar Capabilities additionally require the hosting Mac's full-access Apple Calendar grant, captured once per Link Session: without it the host advertises no Calendar Capability while the handshake, the VM, and unrelated Mac Services stay available, and the blocked grant is reported as content-free status. The grant never widens a mode and a mode is never inferred from the grant. Enabling reads will expose private Mac Service data to processes in the trusted Owner session and must be disclosed wherever real access is offered. Client-supplied fields cannot add Capabilities. The current fake policy is captured in `handshake-fixtures.json`; it exposes only Calendar, Messages, and Notes operations and no shell, SQL, file, script, or generic dispatch surface.
 
-`session.handshake_required`, `session.handshake_already_complete`, `session.invalid_handshake`, `session.invalid_workspace_identity`, and `session.unsupported_protocol` are typed handshake failures. The Swift host and Rust guest consume the shared fixtures. The production channel serves Calendar list and bounded agenda Queries through a grant-gated EventKit adapter. Other operations answer with `request.method_unavailable`, except the explicitly developer-gated Calendar create flow below.
+`session.handshake_required`, `session.handshake_already_complete`, `session.invalid_handshake`, `session.invalid_workspace_identity`, and `session.unsupported_protocol` are typed handshake failures. The Swift host and Rust guest consume the shared fixtures. The production channel serves Calendar list and bounded agenda Queries through a grant-gated EventKit adapter. Other operations answer with `request.method_unavailable`, except the opt-in reviewed Calendar create flow below.
 
 ## The private VM channel
 
@@ -49,7 +49,7 @@ Inside the guest, the Owner-local broker (`omarchy-link daemon`) reads the launc
 
 An agenda Query uses `calendar.events.list` with `{ "start": "<UTC RFC 3339>", "end": "<UTC RFC 3339>", "calendarIds": ["…"] }`. The end is exclusive, must follow the start by no more than eight days, and the optional filter is represented by an empty or unique list of opaque calendar identifiers. Success contains `result.events`; each event has `id`, `calendarId`, `title`, `startsAt`, `endsAt`, and `allDay`. The host adapter must return only events overlapping the requested range and matching that filter.
 
-The fake lifecycle uses invented Calendar values behind replaceable Swift and Rust adapters. Separately, the production channel constructs EventKit only when Calendar Service Mode and the launch-captured Apple grant allow Queries; the adapter itself never prompts. Production Calendar response envelopes are capped conservatively at 64 KiB to fit Owner-local IPC. Oversized or invalid adapter results return content-free `service.unavailable`, never a truncated agenda or a channel failure. Unknown or disabled methods return `request.method_unavailable`; there is no generic dispatch. Host-data execution is restricted to the developer-gated Calendar flow below.
+The fake lifecycle uses invented Calendar values behind replaceable Swift and Rust adapters. Separately, the production channel constructs EventKit only when Calendar Service Mode and the launch-captured Apple grant allow Queries; the adapter itself never prompts. Production Calendar response envelopes are capped conservatively at 64 KiB to fit Owner-local IPC. Oversized or invalid adapter results return content-free `service.unavailable`, never a truncated agenda or a channel failure. Unknown or disabled methods return `request.method_unavailable`; there is no generic dispatch. Host-data execution is restricted to the opt-in reviewed Calendar flow below.
 
 Calendar Read & Write also enables `calendar.events.create.propose`. Its parameters are `{ "title": "…", "startsAt": "<UTC RFC 3339>", "endsAt": "<UTC RFC 3339>", "calendarId": "…" }`. The fake host trims surrounding title whitespace, validates the positive canonical time interval, resolves the opaque calendar identifier through the injected adapter, and returns `result.proposal` with an opaque ID, the fixed `calendar` / `event.create` operation identity, and the exact canonical title, timestamps, calendar ID, and calendar title that must be reviewed. Calendar Read and Off cannot submit this operation.
 
@@ -61,11 +61,12 @@ Cancellation is exactly `{ "type": "cancel", "id": "<request-id>" }`. For pendin
 
 An Invalidation is exactly `{ "type": "event", "event": "invalidation", "service": "calendar" }`, with service one of `calendar`, `messages`, or `notes`. It contains no request ID, object identifier, title, body, count, or other service content and cannot settle a request. The host emits it only for enabled services after negotiation. The guest rejects extra fields on Invalidations. These closed cancellation/Invalidation schemas are deliberate exceptions to ignoring additive fields: extensions must not sneak private content or approval into these safety envelopes. Ordinary request/response fields remain additive.
 
-## Developer-gated real Calendar creation (#12)
+## Opt-in real Calendar creation
 
 The production channel advertises `calendar.events.create.propose` and the additive
-`calendar.events.create.perform` only with hosting Mac development enablement,
-Calendar Read & Write, full EventKit access, and an injected creating adapter.
+`calendar.events.create.perform` only with Calendar Read & Write, full EventKit
+access, and an injected creating adapter. Neither host nor guest needs a
+development flag.
 The fake fixture policy above remains unchanged. The real proposal uses the same
 four-field schema, but rejects extra fields and control characters, limits duration
 to eight days, and resolves only writable calendars. At most 32 proposals are held;
@@ -74,12 +75,26 @@ they expire after 120 seconds and are cleared when the connection closes.
 `calendar.events.create.perform` accepts exactly `{"proposalId":"…"}` and returns
 `result.outcome` equal to `succeeded`, `failed`, or `uncertain`. The host removes
 the proposal before any save, rechecks the exact destination and current grant,
-and invokes EventKit once. Unknown, expired, or consumed proposals cannot save.
-A save exception is conservatively uncertain. Success means EventKit save, not
-cloud delivery. Neither end replays execution after timeout or disconnect.
+and invokes EventKit once. Unknown or expired proposals cannot save.
+The proposal ID is the per-session idempotency key, distinct from the wire
+correlation ID (which must always be fresh). Repeating an accepted key returns
+the recorded outcome without saving again. `failed` includes destination
+conflict before saving; retry requires fresh canonicalization and review.
+
+A save exception stays `uncertain` unless its exact EventKit event identifier
+can be found through a fresh store. No title/time matching, negative inference,
+or second save is permitted. A repeated uncertain key may perform this read-only
+reconciliation again. Success means EventKit persistence, not cloud delivery.
+Neither end automatically replays execution after timeout or disconnect.
+At most 1,024 completed/reserved outcomes are retained per host channel; accepted
+keys are never evicted to make room for new proposals. Exhaustion refuses new
+proposals with `service.unavailable`, leaving Queries available. Completed state
+contains IDs/outcomes only. All pending content and Sync Metadata are memory-only
+and cleared when the channel ends. A restarted host cannot execute an old key;
+its refusal says nothing about the earlier session's uncertain write.
 
 These methods are private **host-channel** operations, not Owner-local approval
-APIs. The separately gated Owner broker accepts `calendar.create` with the four
+APIs. The Owner broker accepts `calendar.create` with the four
 fields, obtains the canonical proposal, and launches its own visible Quickshell
 review using private pipes. Only the renderer's one-shot approval lets the broker
 submit the proposal ID, while the same host connection and active unlocked Owner
@@ -87,8 +102,9 @@ session remain usable. Local `call` cannot approve/perform, and the supported
 `create-calendar` CLI refuses headless output. Review times out after 110 seconds;
 execution has a one-second response deadline and a lost result is uncertain.
 The local create response timeout is 125 seconds rather than the Query timeout.
-New idempotency keys and reconciliation are deferred to #13; every manual retry
-must obtain a fresh canonical proposal and review. See
+Every user retry after uncertainty or conflict must obtain a fresh canonical
+proposal and review, including after reconnect; the broker never reuses a past
+approval. See
 [setup and disposable verification](../../../docs/calendar-create-verification.md).
 
 ## Fake-peer bounds and failure policy

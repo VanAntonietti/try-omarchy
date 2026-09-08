@@ -85,11 +85,13 @@ loads as Off rather than a broader mode. A bounded number of recent Workspace
 entries is retained; a Factory Reset changes the identity, so the reset
 Workspace starts from all-Off regardless of old state.
 
-With `OMARCHY_LINK_DEVELOPMENT=1` the start menu shows a development-only
-Omarchy Link row that cycles each service's mode and states the trust
+The start menu shows an opt-in Omarchy Link row without a development flag.
+Core + Calendar is available for new/reset Workspaces; Messages and Notes are
+not offered yet. The row cycles Calendar's mode and states the trust
 consequence: enabling Read or Read & Write exposes that service's private data
 to every process in the trusted Owner session. The row presents Try Omarchy
-choices, never Apple permissions; released builds render no Link row. An
+choices, never Apple permissions. See [Calendar setup and safety](../docs/calendar-create-verification.md).
+An
 invalid or missing Workspace identity shows the row as unavailable without
 mode choices and without blocking the VM.
 

@@ -27,17 +27,16 @@ struct OmarchyLinkChannelHost {
         workspaceIdentity: OmarchyLinkWorkspaceIdentity,
         calendarAuthorization: OmarchyLinkCalendarAuthorizationState,
         calendarProvider: (any OmarchyLinkCalendarProviding)? = nil,
-        calendarCreator: (any OmarchyLinkCalendarCreating)? = nil,
-        developmentCreates: Bool = false
+        calendarCreator: (any OmarchyLinkCalendarCreating)? = nil
     ) {
         session = OmarchyLinkHostSession(
             serviceModes: serviceModes,
             workspaceIdentity: workspaceIdentity,
             calendarAuthorization: calendarAuthorization,
-            calendarMutationPolicy: developmentCreates && calendarCreator != nil ? .reviewedCreate : .unavailable
+            calendarMutationPolicy: calendarCreator != nil ? .reviewedCreate : .unavailable
         )
         self.calendarProvider = calendarProvider
-        if developmentCreates, let calendarCreator {
+        if let calendarCreator {
             mutations = OmarchyLinkCalendarMutations(provider: calendarCreator)
         }
     }
@@ -302,8 +301,7 @@ final class OmarchyLinkChannelBridge {
             workspaceIdentity: workspaceIdentity,
             calendarAuthorization: calendarAuthorization,
             calendarProvider: calendarProvider,
-            calendarCreator: calendarProvider as? any OmarchyLinkCalendarCreating,
-            developmentCreates: ProcessInfo.processInfo.environment["OMARCHY_LINK_DEVELOPMENT"] == "1"
+            calendarCreator: calendarProvider as? any OmarchyLinkCalendarCreating
         )
         if calendarProvider != nil {
             observeCalendarChanges()

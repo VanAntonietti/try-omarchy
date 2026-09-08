@@ -37,8 +37,7 @@ enum StartMenuOmarchyLinkAvailability: Equatable {
 }
 
 /// What the start menu knows about Omarchy Link for the upcoming launch.
-/// nil at the window level means Link development mode is off and no Link row
-/// is rendered at all.
+/// A window without a Link state provider omits the row.
 struct StartMenuOmarchyLinkMenuState: Equatable {
     let availability: StartMenuOmarchyLinkAvailability
     let modes: OmarchyLinkServiceModes
@@ -286,7 +285,8 @@ enum StartMenuPresentation {
         let boundary = "These are Try Omarchy choices, separate from what macOS allows this app to access."
         let lines = [exposure, persistence, boundary]
 
-        let services: [OmarchyLinkMacService] = [.calendar, .messages, .notes]
+        // Core + Calendar is the opt-in release; other Mac Services are not yet offered.
+        let services: [OmarchyLinkMacService] = [.calendar]
         let enabledCount = services.count { modes.mode(for: $0) != .off }
         return StartMenuOmarchyLinkPresentation(
             detail: lines.joined(separator: " "),

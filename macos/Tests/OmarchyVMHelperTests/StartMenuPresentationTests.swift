@@ -276,11 +276,9 @@ struct StartMenuPresentationTests {
         #expect(presentation.detail.contains("separate from"))
         #expect(!presentation.detail.localizedCaseInsensitiveContains("entitlement"))
         #expect(presentation.isGranted)
-        #expect(presentation.grantedStatusLabel == "\u{25cf}  2 On")
+        #expect(presentation.grantedStatusLabel == "\u{25cf}  1 On")
         #expect(presentation.serviceActions == [
             StartMenuOmarchyLinkServiceAction(service: .calendar, title: "Calendar: Read"),
-            StartMenuOmarchyLinkServiceAction(service: .messages, title: "Messages: Off"),
-            StartMenuOmarchyLinkServiceAction(service: .notes, title: "Notes: Read & Write"),
         ])
         for action in presentation.serviceActions {
             #expect(!action.title.localizedCaseInsensitiveContains("permission"))
@@ -299,7 +297,7 @@ struct StartMenuPresentationTests {
         #expect(presentation.detail.contains("not saved"))
         #expect(presentation.detail.contains("trusted Owner session"))
         #expect(!presentation.isGranted)
-        #expect(presentation.serviceActions.count == 3)
+        #expect(presentation.serviceActions.count == 1)
     }
 
     @Test("an invalid Workspace identity disables Link choices, not the VM")
@@ -356,7 +354,7 @@ struct StartMenuPresentationTests {
         // Mode choices survive every grant state: remediation never removes
         // the user's Service Mode controls or claims the VM is affected.
         for presentation in [notDetermined, denied, restricted] {
-            #expect(presentation.serviceActions.count == 3)
+            #expect(presentation.serviceActions.count == 1)
             #expect(presentation.calendarAccessDetail?.localizedCaseInsensitiveContains("permission") != true)
         }
     }

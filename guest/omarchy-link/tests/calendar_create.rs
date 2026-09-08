@@ -31,6 +31,36 @@ fn supported_cli_refuses_headless_creation_and_call_cannot_approve() {
 }
 
 #[test]
+fn graphical_cli_accepts_a_request_without_a_development_flag() {
+    // A PTY is the CLI's public interactive boundary. No actual review or host
+    // exists here: reaching IPC returns uncertainty rather than gate refusal.
+    let output = std::process::Command::new("python3")
+        .args(["-c", r#"
+import os, pty, subprocess, sys
+master, terminal = pty.openpty()
+try:
+    result = subprocess.run([sys.argv[1], 'create-calendar'],
+        input=b'{"title":"Invented","startsAt":"2026-09-14T09:00:00Z","endsAt":"2026-09-14T10:00:00Z","calendarId":"invented"}',
+        stdout=terminal, stderr=subprocess.PIPE, timeout=5)
+    assert result.returncode == 0, (result.returncode, result.stderr)
+    assert b'uncertain' in os.read(master, 4096)
+finally:
+    os.close(master)
+    os.close(terminal)
+"#, env!("CARGO_BIN_EXE_omarchy-link")])
+        .env_remove("OMARCHY_LINK_DEVELOPMENT")
+        .env_remove("XDG_RUNTIME_DIR")
+        .env("WAYLAND_DISPLAY", "invented")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn create_outcome_is_correlated_and_disconnect_cannot_replay() {
     let mut peer = GuestPeer::new();
     peer.hello_frame().unwrap();

@@ -26,6 +26,28 @@ Omarchy's trademark rights.
 
 > **Current limitation:** Video decoding is CPU-only, so playback can be slow, especially at high resolutions. An improved video path is in development.
 
+## Omarchy Link: opt-in Calendar
+
+On a **new/reset Workspace** using the current guest image, the Mac start menu
+can enable Calendar **Read** or **Read & Write**. Everything defaults to Off;
+no development flag is needed. Existing persistent disks are not upgraded, and
+disposable runs have no Link channel. Messages and Notes are not yet offered.
+
+Calendar also needs an explicit macOS Calendar grant from the start menu; the
+guest cannot prompt for it. A grant never widens your selected Service Mode.
+Enabled reads expose private Calendar data to **every process in the trusted
+Owner session**. Supported creates require a visible, host-canonical Review
+Interlock in Omarchy; this is a safety control, not protection against a
+compromised Owner session or guest root.
+
+Open **Omarchy Link Calendar** in the guest launcher for Today/Next 7 days.
+Creation uses `omarchy-link create-calendar` from a graphical terminal, with
+JSON on stdin and mandatory visible review. Uncertain writes are never silently
+retried; inspect Calendar and obtain a fresh proposal/review before retrying.
+Content stays in memory/private IPC, with no content cache or request logging;
+the intended event is saved to Calendar. See [setup, limits, privacy, and
+verification](docs/calendar-create-verification.md).
+
 ## Changes in this fork
 
 This fork moves the runtime to QEMU 11.1.1 to pick up Apple's in-hypervisor

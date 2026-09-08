@@ -21,22 +21,31 @@ struct OmarchyLinkCalendarCreate {
 protocol OmarchyLinkCalendarCreating {
     func writableCalendars() throws -> [OmarchyLinkCalendar]
     func create(_ event: OmarchyLinkCalendarCreate) throws
+    /// Positive evidence for this exact save only; absence is not proof of failure.
+    func confirmsCreate(_ proposalID: String) -> Bool
 }
 
 enum OmarchyLinkCalendarCreateOutcome: String {
     case succeeded, failed, uncertain
 }
 
-/// Session-local, expiring proposals. Consume before touching EventKit; neither
-/// errors nor lost responses authorize a replay. Retry reconciliation is #13.
+/// Session-local, expiring proposals. The proposal ID is the idempotency key.
+/// Consume before touching EventKit; neither errors nor lost responses authorize
+/// a second save. Completed entries contain only bounded Sync Metadata.
 struct OmarchyLinkCalendarMutations {
     let provider: any OmarchyLinkCalendarCreating
     private var pending: [String: (OmarchyLinkCalendarCreate, Date)] = [:]
+    private var completed: [String: OmarchyLinkCalendarCreateOutcome] = [:]
 
     init(provider: any OmarchyLinkCalendarCreating) { self.provider = provider }
 
     mutating func propose(_ parameters: [String: Any]) throws -> OmarchyLinkCalendarCreate {
         pending = pending.filter { $0.value.1 > Date() }
+        // Reserve an outcome slot for every proposal. Never evict an accepted
+        // key during the session: budget exhaustion disables new writes only.
+        guard completed.count + pending.count < 1024 else {
+            throw OmarchyLinkProtocolError.resourceLimit
+        }
         guard pending.count < 32,
               Set(parameters.keys) == ["title", "startsAt", "endsAt", "calendarId"],
               let rawTitle = parameters["title"] as? String,
@@ -70,6 +79,19 @@ struct OmarchyLinkCalendarMutations {
     }
 
     mutating func perform(_ id: String) -> OmarchyLinkCalendarCreateOutcome {
+        let outcome: OmarchyLinkCalendarCreateOutcome
+        if let recorded = completed[id] {
+            outcome = recorded
+        } else {
+            guard pending[id] != nil else { return .failed }
+            outcome = consume(id)
+        }
+        let reconciled = outcome == .uncertain && provider.confirmsCreate(id) ? .succeeded : outcome
+        completed[id] = reconciled
+        return reconciled
+    }
+
+    private mutating func consume(_ id: String) -> OmarchyLinkCalendarCreateOutcome {
         guard let (proposal, expiry) = pending.removeValue(forKey: id), expiry > Date() else {
             return .failed
         }

@@ -570,8 +570,8 @@ final class StartMenuWindow: NSObject, NSWindowDelegate {
         )
         let immersiveRow = immersiveSettingRow(isEnabled: immersiveMode())
 
-        // Omarchy Link is development-gated: without a menu state there is no
-        // row, so released builds keep today's menu exactly.
+        // The application provides Link state even when the Workspace is
+        // unsupported, so unavailability never hides the explanation.
         var omarchyLinkRow: NSView?
         if let linkState = omarchyLinkStatus() {
             let linkPresentation = StartMenuPresentation.omarchyLink(

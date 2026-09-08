@@ -231,9 +231,8 @@ final class VMApplicationController: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// nil hides the Link row entirely; Omarchy Link has no release UI yet.
+    /// Calendar is opt-in for Workspaces with a validated Link identity.
     private func omarchyLinkMenuState() -> StartMenuOmarchyLinkMenuState? {
-        guard baseEnvironment["OMARCHY_LINK_DEVELOPMENT"] == "1" else { return nil }
         // Read fresh on every render so remediation reflects a grant the user
         // just changed. The running Link Session still captures its own
         // snapshot at bridge start.

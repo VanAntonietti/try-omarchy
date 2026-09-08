@@ -15,7 +15,7 @@ use std::str::FromStr;
 
 fn usage() {
     eprintln!(
-        "usage: omarchy-link <daemon|call|status|create-calendar (JSON on stdin, visible development review)|demo-agenda --date YYYY-MM-DD --range today|seven-days [--calendar ID]|demo-create --title TITLE --start UTC --end UTC --calendar ID>"
+        "usage: omarchy-link <daemon|call|status|create-calendar (JSON on stdin, visible review)|demo-agenda --date YYYY-MM-DD --range today|seven-days [--calendar ID]|demo-create --title TITLE --start UTC --end UTC --calendar ID>"
     );
 }
 
@@ -44,11 +44,8 @@ fn main() -> ExitCode {
             }
         }
         Some("create-calendar") if arguments.next().is_none() => {
-            if env::var("OMARCHY_LINK_DEVELOPMENT").as_deref() != Ok("1")
-                || !io::stdout().is_terminal()
-                || env::var_os("WAYLAND_DISPLAY").is_none()
-            {
-                eprintln!("omarchy-link: visible development Calendar review required");
+            if !io::stdout().is_terminal() || env::var_os("WAYLAND_DISPLAY").is_none() {
+                eprintln!("omarchy-link: visible Calendar review required");
                 return ExitCode::from(77);
             }
             use std::io::Read;
