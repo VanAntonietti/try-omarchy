@@ -6,7 +6,7 @@ and include reproduction steps, affected versions, and the expected impact.
 
 Only the current `main` branch is supported before the first stable release.
 Security-sensitive areas include downloaded build inputs, artifact and manifest
-validation, code signing, VM disk handling, the QEMU process boundary, and the
+validation, code signing, VM disk handling, the QEMU process boundary, the
 guest-to-host audio bridge, and the opt-in Omarchy Link channel.
 
 Omarchy Link trusts the enabled Workspace's Owner session: enabled reads expose

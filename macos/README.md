@@ -90,16 +90,16 @@ Core + Calendar is available for new/reset Workspaces; Messages and Notes are
 not offered yet. The row cycles Calendar's mode and states the trust
 consequence: enabling Read or Read & Write exposes that service's private data
 to every process in the trusted Owner session. The row presents Try Omarchy
-choices, never Apple permissions. See [Calendar setup and safety](../docs/calendar-create-verification.md).
-An
-invalid or missing Workspace identity shows the row as unavailable without
+choices, never Apple permissions. See
+[Calendar setup and safety](../docs/calendar-create-verification.md).
+An invalid or missing Workspace identity shows the row as unavailable without
 mode choices and without blocking the VM.
 
 A Link Session receives one immutable Service Mode snapshot captured at
 launch (`OmarchyLinkServiceModePolicy.sessionModes`); changing preferences
-afterwards affects only the next launch. Ephemeral launches use explicit
-one-run choices held in memory and never written to the store, so they cannot
-persist to a later launch. Off advertises no Capability for that service, Read
+afterwards affects only the next launch. Ephemeral launches have no Link channel
+and show Link as unavailable, without mode choices. Off advertises no Capability
+for that service, Read
 advertises no mutation Capability, and Read & Write proposals still pass the
 Review Interlock.
 

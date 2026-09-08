@@ -55,8 +55,8 @@ compromised Owner or guest root. Enabling a Mac Service trusts the Owner session
 The review has a 110-second deadline; host proposals expire after 120 seconds
 and at most 32 are held in memory. Only one guest review is active at a time.
 Creation consumes a proposal before EventKit. Changed/unwritable destinations
-fail without a save. A save exception is reconciled only if EventKit supplied an exact event identifier
-and a fresh store can find that event. No title/time matching or second save is
+fail without a save. A save exception is reconciled only if EventKit supplied an
+exact event identifier and a fresh store can find that event. No title/time matching or second save is
 used; absent evidence, revoked access, or a lost execution result stays explicitly
 `uncertain`. Neither broker nor host automatically replays a create.
 

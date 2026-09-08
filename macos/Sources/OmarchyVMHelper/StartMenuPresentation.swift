@@ -30,7 +30,7 @@ enum StartMenuOmarchyLinkAvailability: Equatable {
     /// A persistent Workspace with a validated Link identity; choices persist
     /// for that Workspace and freeze when Omarchy starts.
     case workspace
-    /// A disposable run; choices apply to this run only and are not saved.
+    /// A disposable run; no Link channel is attached.
     case ephemeral
     /// The Workspace identity is missing or invalid, so only Link is off.
     case unavailable
@@ -255,9 +255,11 @@ enum StartMenuPresentation {
         availability: StartMenuOmarchyLinkAvailability,
         calendarAuthorization: OmarchyLinkCalendarAuthorizationState
     ) -> StartMenuOmarchyLinkPresentation {
-        if availability == .unavailable {
+        if availability != .workspace {
             let lines = [
-                "Omarchy Link is unavailable because this VM has no valid Workspace identity.",
+                availability == .ephemeral
+                    ? "Omarchy Link is unavailable in disposable VMs; use a new/reset persistent Workspace."
+                    : "Omarchy Link is unavailable because this VM has no valid Workspace identity.",
                 "Omarchy still starts and runs without it.",
             ]
             return StartMenuOmarchyLinkPresentation(
@@ -279,9 +281,7 @@ enum StartMenuPresentation {
 
         let exposure = "Turning on Read or Read & Write exposes that service\u{2019}s "
             + "private data to every process in the trusted Owner session inside Omarchy."
-        let persistence = availability == .ephemeral
-            ? "Choices for this disposable VM apply to this run only and are not saved."
-            : "Choices freeze when Omarchy starts; a change applies to the next launch."
+        let persistence = "Choices freeze when Omarchy starts; a change applies to the next launch."
         let boundary = "These are Try Omarchy choices, separate from what macOS allows this app to access."
         let lines = [exposure, persistence, boundary]
 

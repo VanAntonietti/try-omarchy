@@ -285,7 +285,7 @@ struct StartMenuPresentationTests {
         }
     }
 
-    @Test("an ephemeral run presents one-run choices that are not saved")
+    @Test("an ephemeral run explains that Calendar is unavailable without offering mode choices")
     func omarchyLinkEphemeralGuidance() {
         let presentation = StartMenuPresentation.omarchyLink(
             modes: .allOff,
@@ -293,11 +293,12 @@ struct StartMenuPresentationTests {
             calendarAuthorization: .authorized
         )
 
-        #expect(presentation.detail.contains("this run only"))
-        #expect(presentation.detail.contains("not saved"))
-        #expect(presentation.detail.contains("trusted Owner session"))
+        #expect(presentation.detail.contains("unavailable"))
+        #expect(presentation.detail.contains("disposable"))
+        #expect(presentation.detail.contains("still starts"))
         #expect(!presentation.isGranted)
-        #expect(presentation.serviceActions.count == 1)
+        #expect(presentation.serviceActions.isEmpty)
+        #expect(presentation.calendarAccessAction == nil)
     }
 
     @Test("an invalid Workspace identity disables Link choices, not the VM")
