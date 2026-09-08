@@ -108,9 +108,12 @@ def run():
                         model.dirty = True
                     emit(model.snapshot)
             except Exception:
-                model.snapshot = {'calendars': [], 'events': []}
-                model.dirty = True
-                emit({'error': 'Calendar unavailable'})
+                # A superseded Query cannot change the new selection, whether
+                # it succeeds or fails. select() already scheduled its refresh.
+                if generation == model.generation:
+                    model.snapshot = {'calendars': [], 'events': []}
+                    model.dirty = True
+                    emit({'error': 'Calendar unavailable'})
             pending = None
         if pending is None and model.refresh_due(time.monotonic(), status.get('calendarRevision')):
             generation = model.generation

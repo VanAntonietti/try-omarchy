@@ -29,7 +29,9 @@ calendars, screenshots, logs, or issue attachments as evidence.
    If a dense agenda exceeds the local IPC budget, verify the surface reports
    unavailability with no stale events while retaining the calendar choices.
    Select a narrower calendar filter/date range and confirm it remains queryable;
-   it must not silently truncate events or disable Link.
+   it must not silently truncate events or disable Link. Change filters while a
+   Query is outstanding: a late success or failure from the old selection must
+   not replace the new view or display an unrelated unavailability error.
 6. Lock using the normal Omarchy lock action (Hyprlock). Verify the sensitive
    window closes within the bounded status/probe latency (normally under one
    second). Unlock: the window must not reopen. Explicitly reopen and verify
@@ -50,6 +52,7 @@ Queries, exact UTC bounds and filters, lock-before/lock-during-query refusal,
 content-free Invalidations, disconnect failure, and quiet logs. Python tests
 exercise the deterministic model and the actual private-pipe driver with an
 invented broker, including narrowing an unavailable agenda using retained
-calendar choices and clearing content on lock. Quickshell rendering, real
+calendar choices, ignoring failed Queries for superseded selections, and clearing
+content on lock. Quickshell rendering, real
 logind/Hyprlock behavior, and real
 EventKit Invalidations require the manual run above.

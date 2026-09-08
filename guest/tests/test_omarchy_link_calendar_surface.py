@@ -56,6 +56,64 @@ class CalendarSurfaceTests(unittest.TestCase):
     def test_unavailable_agenda_keeps_filters_for_recovery_then_clears_on_lock(self):
         self.exercise_bridge(dense_agenda=True)
 
+    def test_failed_old_query_does_not_replace_new_selection(self):
+        import json
+        import os
+        import select
+        import socketserver
+        import struct
+        import subprocess
+        import tempfile
+        import threading
+
+        started = threading.Event()
+        release = threading.Event()
+
+        class Broker(socketserver.StreamRequestHandler):
+            def handle(self):
+                size, = struct.unpack('!I', self.rfile.read(4))
+                request = json.loads(self.rfile.read(size))
+                if request['method'] == 'status':
+                    response = {'contentAllowed': True, 'hostAvailable': True, 'calendarRevision': 0}
+                elif request['method'] == 'calendar.calendars.list':
+                    response = {'calendars': [{'id': 'a', 'title': 'Invented calendar'}]}
+                elif not request['calendarIds']:
+                    started.set()
+                    release.wait(timeout=5)
+                    return  # Transport failure for the superseded Query.
+                else:
+                    response = {'events': [{'calendarId': 'a', 'title': 'New selection'}]}
+                body = json.dumps(response).encode()
+                self.wfile.write(struct.pack('!I', len(body)) + body)
+
+        with tempfile.TemporaryDirectory(prefix='link-selection-', dir='/tmp') as directory:
+            root = Path(directory)
+            (root / 'omarchy-link').mkdir(mode=0o700)
+            with socketserver.ThreadingUnixStreamServer(str(root / 'omarchy-link/socket'), Broker) as server:
+                thread = threading.Thread(target=server.serve_forever)
+                thread.start()
+                process = subprocess.Popen([os.sys.executable, '-B', str(PATH.with_name('bridge.py'))],
+                    env={**os.environ, 'XDG_RUNTIME_DIR': directory}, stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                try:
+                    self.assertTrue(started.wait(timeout=5))
+                    process.stdin.write(json.dumps({'range': 'today', 'calendar': 'a'}) + '\n')
+                    process.stdin.flush()
+                    self.assertTrue(select.select([process.stdout], [], [], 5)[0])
+                    self.assertEqual(json.loads(process.stdout.readline()), {'calendars': [], 'events': []})
+                    release.set()
+                    self.assertTrue(select.select([process.stdout], [], [], 5)[0])
+                    snapshot = json.loads(process.stdout.readline())
+                    self.assertNotIn('error', snapshot)
+                    self.assertEqual(snapshot['events'], [{'calendarId': 'a', 'title': 'New selection'}])
+                finally:
+                    release.set()
+                    process.kill()
+                    _, errors = process.communicate(timeout=5)
+                    server.shutdown()
+                    thread.join(timeout=3)
+                self.assertEqual(errors, '')
+
     def exercise_bridge(self, dense_agenda):
         import json
         import os
