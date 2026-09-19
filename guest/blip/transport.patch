@@ -1,0 +1,62 @@
+--- a/bridge/linux/blip-shim
++++ b/bridge/linux/blip-shim
+@@ -23,7 +23,7 @@
+ # remote_bin is expanded by the MAC's shell, so keep it literal here — a bare
+ # ~ or $HOME in bridge.conf would expand to the Linux home (it did).
+ host=""; remote_bin='$HOME/.blip/bin'; python="python3"; key="$HOME/.ssh/blip_ed25519"
+-hide_spam=""; hide_unknown=""
++hide_spam=""; hide_unknown=""; transport="ssh"
+ # Parsed, not sourced: the file is data. Known keys only, quotes stripped.
+ if [[ -r "$CONF" ]]; then
+   while IFS= read -r line || [[ -n "$line" ]]; do
+@@ -32,6 +32,7 @@
+     k="${line%%=*}"; v="${line#*=}"
+     v="${v#\"}"; v="${v%\"}"; v="${v#\'}"; v="${v%\'}"
+     case "$k" in
++      transport) transport="$v" ;;
+       host) host="$v" ;;
+       remote_bin) remote_bin="$v" ;;
+       python) python="$v" ;;
+@@ -41,6 +42,15 @@
+     esac
+   done < "$CONF"
+ fi
++# Selection is explicit. An unavailable Link must never fall back to SSH.
++case "$transport" in
++  ssh) ;;
++  omarchy-link)
++    ulimit -c 0
++    exec bun "$(dirname "$0")/blip-link.ts" "$(basename "$0")" "$@"
++    ;;
++  *) echo 'blip: unknown transport' >&2; exit 78 ;;
++esac
+ host="${BLIP_MAC_HOST:-$host}"
+ if [[ -z "$host" ]]; then
+   echo "blip: no Mac configured — run blip-setup (or set host= in $CONF)" >&2
+--- a/scripts/blip-setup
++++ b/scripts/blip-setup
+@@ -17,6 +17,11 @@
+ set -euo pipefail
+ 
+ here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
++if [[ "${1:-}" == --transport=omarchy-link ]]; then
++  [[ $# == 1 ]] || { echo 'blip: unexpected setup arguments' >&2; exit 64; }
++  ulimit -c 0
++  exec bun "$here/bridge/linux/blip-link.ts" setup "$here"
++fi
+ host="${1:-}"
+ 
+ # 0. Linux prerequisites — say exactly what is missing instead of failing later
+@@ -69,10 +74,11 @@
+ # spell, otp_autofill, ui_font, ui_font_size, anything set by hand — must survive
+ # a re-run; a wholesale rewrite silently re-enabled what the user had turned off (Astra #18).
+ kept=""
+-[[ -r "$conf" ]] && kept="$(grep -vE '^[[:space:]]*(#|$|host=|remote_bin=|python=|key=|automation=|country_code=|bin_dir[[:space:]]*=)' "$conf" || true)"
++[[ -r "$conf" ]] && kept="$(grep -vE '^[[:space:]]*(#|$|host=|remote_bin=|python=|key=|automation=|country_code=|transport[[:space:]]*=|bin_dir[[:space:]]*=)' "$conf" || true)"
+ mkdir -p "$conf_dir"
+ {
+   echo "# Blip bridge — read (never sourced) by the imsg, imsg-send, imsg-read, contacts, contact-save shims"
++  echo "transport=ssh"
+   echo "host=$host"
+   echo "# single-quoted on purpose: expanded on the MAC, not here"
+   echo "remote_bin='\$HOME/.blip/bin'"

@@ -1,0 +1,8 @@
+{
+  "repository": "https://github.com/nixfred/blip",
+  "commit": "f06f7deae0cf1dd4218966e95c1c8de15e9111c3",
+  "url": "https://codeload.github.com/nixfred/blip/tar.gz/f06f7deae0cf1dd4218966e95c1c8de15e9111c3",
+  "sourceSha256": "172f55773f08e4bb20653fd31523f22f61bbbe9bab85a55dd5a959f073413f0a",
+  "licenseSha256": "94ca7ed57542f0e3d0bda127524390d008a850de3965df40cbd8997f39300099",
+  "patchSha256": "dbd10302fb4b7b8b6ba50566a71d37689261e43e7508312b5eb81bfe095247d9"
+}

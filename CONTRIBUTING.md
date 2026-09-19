@@ -55,6 +55,11 @@ fields to make them agree; they record different upstream identities.
 
 ## Tests
 
+The pinned Blip transport tests additionally need Bun 1.4.2, Bash 4.4+, Python
+3.12+, and `patch`. Install their exact typechecking dependencies once with
+`cd guest/blip && bun install --frozen-lockfile`. `make test-blip-linux` runs
+Blip's upstream Linux fixtures in disposable Docker; see `guest/blip/README.md`.
+
 Tests should describe a user-visible behavior, policy, data contract, or
 process boundary. Keep presentation and edit rules in deterministic models that
 can be exercised without opening AppKit windows. Do not make CI depend on pixel

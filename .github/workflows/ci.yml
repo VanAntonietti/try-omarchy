@@ -23,8 +23,25 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - name: Install Blip test prerequisites
+        run: |
+          brew install bash
+          cd guest/blip && bun install --frozen-lockfile
+
       # This compiles the Swift product and runs the native, shell, and guest
       # contract suites. The full build additionally requires privileged ARM64
       # Docker, which is unavailable on GitHub-hosted macOS runners.
       - name: Run test suite
         run: make test
+
+  blip:
+    name: Pinned Blip transport and upstream fixtures
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run isolated Linux fixtures
+        run: make test-blip-linux

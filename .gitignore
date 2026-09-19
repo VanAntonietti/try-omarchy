@@ -21,5 +21,6 @@ __pycache__/
 /dist/
 /.build/
 /guest/.work/
+/guest/blip/node_modules/
 /guest/omarchy-link/target/
 /macos/.swiftpm/

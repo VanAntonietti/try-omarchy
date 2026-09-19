@@ -34,6 +34,12 @@ code.
   pinned in `guest/spec.json` and built natively for ARM64. Its packaged
   `LICENSE` and `NOTICE` retain attribution to TerminalTextEffects and
   ChrisBuilds.
+- **Blip** — MIT, Copyright (c) 2026 Fred Nix. The staged transport adapter
+  retains upstream source at commit `f06f7deae0cf1dd4218966e95c1c8de15e9111c3`,
+  its complete MIT license, and a checksum-pinned temporary patch under
+  `guest/blip/`. Source/patch/license identities are in `guest/blip/pin.json`;
+  preparation emits adapter provenance. It is not installed in factory
+  Workspaces. See `guest/blip/README.md` for the activation gate and removal path.
 - **Omarchy Link Rust dependencies** — Serde, serde_json, and their transitive
   crates retain their respective MIT, Apache-2.0, and Unicode licenses. Exact
   versions and registry checksums are locked in `guest/omarchy-link/Cargo.lock`;

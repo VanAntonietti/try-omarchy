@@ -15,7 +15,7 @@ PACKAGE_NOTARY_PROFILE ?= $(RELEASE_NOTARY_PROFILE)
 FORCE ?= 0
 
 .DEFAULT_GOAL := help
-.PHONY: help doctor test guest runtime app build run run-ephemeral reset update-omarchy package package-preflight release release-preflight clean clean-all clean-guest
+.PHONY: help doctor test test-blip-linux guest runtime app build run run-ephemeral reset update-omarchy package package-preflight release release-preflight clean clean-all clean-guest
 
 help:
 	@printf '%s\n' \
@@ -53,6 +53,7 @@ doctor:
 	@printf 'Toolchain ready: %s (%s)\n' "$$(sw_vers -productVersion)" "$$(uname -m)"
 
 test:
+	@python3 "$(ROOT)/guest/blip/test.py"
 	@cd "$(ROOT)/guest/omarchy-link" && cargo test --locked --offline
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/macos/Tests/test-libslirp-icmp.py"
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/macos/Tests/test-cocoa-pinch.py"
@@ -74,6 +75,10 @@ test:
 	@$(ROOT)/macos/Tests/omarchy-link-workspace.test.sh
 	@$(ROOT)/macos/Tests/omarchy-link-channel.test.sh
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/macos/Tests/resize-vm-disk.test.py"
+
+test-blip-linux:
+	@docker build -f "$(ROOT)/guest/blip/Test.Containerfile" -t try-omarchy-blip-test "$(ROOT)"
+	@docker run --rm --network=none try-omarchy-blip-test
 
 guest:
 	@OMARCHY_FORCE_BUILD="$(FORCE)" "$(BUILD_CACHE)" \
