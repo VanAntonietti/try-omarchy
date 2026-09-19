@@ -41,7 +41,8 @@ struct StartMenuOmarchyLinkRowTests {
         let calendarButton = try #require(
             descendant(withIdentifier: "permission-action-link", in: content) as? NSButton
         )
-        #expect(calendarButton.title == "Calendar: Off")
+        #expect(calendarButton.accessibilityLabel() == "Calendar: Off")
+        #expect(calendarButton.attributedTitle.string == "CALENDAR: OFF")
 
         calendarButton.performClick(nil)
 
@@ -52,7 +53,8 @@ struct StartMenuOmarchyLinkRowTests {
         let updatedButton = try #require(
             descendant(withIdentifier: "permission-action-link", in: rerendered) as? NSButton
         )
-        #expect(updatedButton.title == "Calendar: Read")
+        #expect(updatedButton.accessibilityLabel() == "Calendar: Read")
+        #expect(updatedButton.attributedTitle.string == "CALENDAR: READ")
         #expect(descendant(withIdentifier: "permission-action-link-1", in: rerendered) == nil)
     }
 
@@ -99,11 +101,13 @@ struct StartMenuOmarchyLinkRowTests {
         let calendarButton = try #require(
             descendant(withIdentifier: "permission-action-link-0", in: content) as? NSButton
         )
-        #expect(calendarButton.title == "Calendar: Read")
+        #expect(calendarButton.accessibilityLabel() == "Calendar: Read")
+        #expect(calendarButton.attributedTitle.string == "CALENDAR: READ")
         let remediationButton = try #require(
             descendant(withIdentifier: "permission-action-link-1", in: content) as? NSButton
         )
-        #expect(remediationButton.title == "Open Settings")
+        #expect(remediationButton.accessibilityLabel() == "Open Settings")
+        #expect(remediationButton.attributedTitle.string == "OPEN SETTINGS")
     }
 
     private func makeMenu(

@@ -6,7 +6,7 @@ import Foundation
 private var terminationSignalSources: [DispatchSourceSignal] = []
 
 private func usage() -> Never {
-    fputs("Usage: omarchy-vm-helper --run-qemu [--ephemeral | --reset-storage | --reset-storage-only] [GUEST_DIR] | --workspace-binding DIRECTORY | --sync-storage PATH | --bridge-command-super QEMU_PID QMP_SOCKET | --bridge-native-audio QEMU_PID SOCKET ROUTE_DIRECTORY | --bridge-native-camera QEMU_PID SOCKET | --bridge-native-clipboard QEMU_PID SOCKET | --link-session-modes WORKSPACE_IDENTITY | --bridge-omarchy-link QEMU_PID SOCKET WORKSPACE_IDENTITY CALENDAR_MODE MESSAGES_MODE NOTES_MODE\n", stderr)
+    fputs("Usage: omarchy-vm-helper --run-qemu [--ephemeral | --reset-storage | --reset-storage-only] [GUEST_DIR] | --workspace-binding DIRECTORY | --sync-storage PATH | --bridge-command-super QEMU_PID QMP_SOCKET | --bridge-native-audio QEMU_PID SOCKET ROUTE_DIRECTORY | --bridge-native-authentication QEMU_PID SOCKET | --bridge-native-camera QEMU_PID SOCKET | --bridge-native-clipboard QEMU_PID SOCKET | --link-session-modes WORKSPACE_IDENTITY | --bridge-omarchy-link QEMU_PID SOCKET WORKSPACE_IDENTITY CALENDAR_MODE MESSAGES_MODE NOTES_MODE\n", stderr)
     exit(64)
 }
 
@@ -32,6 +32,38 @@ do {
         exit(0)
     }
 
+    if arguments.first == "--bridge-network-link" {
+        guard arguments.count == 4, let pid = Int32(arguments[1]), pid > 1 else { usage() }
+        try NetworkLinkBridge.run(targetPID: pid, qmpSocketPath: arguments[2], statusPath: arguments[3])
+        exit(0)
+    }
+
+    if arguments.first == "--network-service-status" {
+        print(MainActor.assumeIsolated { NetworkService.statusText })
+        exit(0)
+    }
+    if arguments.first == "--network-service-register" {
+        try MainActor.assumeIsolated { try NetworkService.prepare() }
+        print(MainActor.assumeIsolated { NetworkService.statusText })
+        exit(0)
+    }
+    if arguments.first == "--network-service-remove" || arguments.first == "--network-service-repair" {
+        Task { @MainActor in
+            do {
+                if arguments.first == "--network-service-repair" {
+                    try await NetworkService.repair()
+                } else {
+                    try await NetworkService.remove()
+                }
+                print(NetworkService.statusText)
+                exit(0)
+            } catch {
+                fputs("Networking helper operation failed: \(error.localizedDescription)\n", stderr)
+                exit(1)
+            }
+        }
+        dispatchMain()
+    }
     if arguments.first == "--bridge-native-audio" {
         guard arguments.count == 4,
               let processIdentifier = Int32(arguments[1]),
@@ -77,6 +109,29 @@ do {
             terminationSignalSources.append(source)
         }
         fputs("[clipboard-bridge] The Mac clipboard is shared with Omarchy.\n", stderr)
+        try bridge.run()
+        exit(0)
+    }
+
+    if arguments.first == "--bridge-native-authentication" {
+        guard arguments.count == 3,
+              let processIdentifier = Int32(arguments[1]),
+              processIdentifier > 1 else { usage() }
+        let bridge = try NativeAuthenticationBridge(
+            targetPID: processIdentifier,
+            socketPath: arguments[2]
+        )
+        for signalNumber in [SIGINT, SIGTERM] {
+            Darwin.signal(signalNumber, SIG_IGN)
+            let source = DispatchSource.makeSignalSource(
+                signal: signalNumber,
+                queue: .global(qos: .userInitiated)
+            )
+            source.setEventHandler { bridge.stop() }
+            source.resume()
+            terminationSignalSources.append(source)
+        }
+        fputs("[authentication-bridge] Signed Touch ID sudo authentication is available inside Omarchy.\n", stderr)
         try bridge.run()
         exit(0)
     }

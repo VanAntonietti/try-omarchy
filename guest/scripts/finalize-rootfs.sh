@@ -21,8 +21,23 @@ read_spec() {
 
 locale-gen
 passwd --lock root >/dev/null
+# Check the effective sudoers policy and the package-owned menu grants before
+# publishing an image. Materialization runs as root in the ARM64 builder.
+visudo --check
+for name in omarchy-dns omarchy-theme-browser; do
+  policy="/etc/sudoers.d/$name"
+  [[ $(stat -c '%u:%g:%a' "$policy") == 0:0:440 ]] || {
+    echo "Unsafe ownership or permissions on $policy" >&2
+    exit 1
+  }
+  [[ $(pacman -Qoq "$policy") == try-omarchy-runtime ]] || {
+    echo "Menu sudoers policy is not owned by the Omarchy runtime: $policy" >&2
+    exit 1
+  }
+done
 systemctl enable NetworkManager.service
 systemctl enable systemd-resolved.service
+systemctl enable systemd-timesyncd.service
 
 # Avoid a systemctl introspection path that crashes under some ARM container
 # runtimes after it has already written the link.
@@ -48,6 +63,22 @@ printf '%s  %s\n' "$expected_hyprland_sha256" /usr/bin/Hyprland | sha256sum -c -
   echo "Rounded-border Hyprland binary digest mismatch" >&2
   exit 1
 }
+expected_voxtype="$(read_spec '["supplyChain"]["voxtype"]["version"]')-$(read_spec '["supplyChain"]["voxtype"]["pkgrel"]')"
+[[ ! $(pacman -Qq voxtype-bin 2>/dev/null || true) ]] || {
+  echo "Opt-in Voxtype must not be installed in the factory image" >&2
+  exit 1
+}
+voxtype_resolution=$(pacman -Sp --print-format '%n %v %a' voxtype-bin)
+grep -Fxq "voxtype-bin $expected_voxtype aarch64" <<<"$voxtype_resolution" || {
+  echo "Pinned ARM64 Voxtype package does not resolve: $voxtype_resolution" >&2
+  exit 1
+}
+for dependency in gtk4-layer-shell which; do
+  grep -Eq "^${dependency} [^ ]+ aarch64$" <<<"$voxtype_resolution" || {
+    echo "Voxtype runtime dependency does not resolve for ARM64: $dependency" >&2
+    exit 1
+  }
+done
 [[ $(pacman -Qoq /usr/local/bin/omarchy-native-cursor-restore) == try-omarchy-runtime ]] || {
   echo "Screensaver cursor helper is not owned by the Omarchy runtime package" >&2
   exit 1
@@ -56,6 +87,18 @@ if pacman -Qq vivaldi >/dev/null 2>&1; then
   echo "Vivaldi must remain a user-initiated post-build install" >&2
   exit 1
 fi
+# Ship the signature verifier so selecting Vivaldi never needs a separate
+# dependency bootstrap. Execute both tools to catch missing shared libraries.
+pacman -Qkk rpm-tools >/dev/null || {
+  echo "Factory Vivaldi signature verifier package is missing or incomplete" >&2
+  exit 1
+}
+for verifier in rpm rpmkeys; do
+  "$verifier" --version >/dev/null || {
+    echo "Factory Vivaldi signature verifier cannot run: $verifier" >&2
+    exit 1
+  }
+done
 vivaldi_installer=/usr/local/lib/try-omarchy/install-vivaldi-arm64
 vivaldi_key=/usr/local/share/try-omarchy/vivaldi/linux_signing_key.pub
 [[ -x $vivaldi_installer && ! -L $vivaldi_installer ]] || {

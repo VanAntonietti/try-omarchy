@@ -36,6 +36,23 @@ is updated. Graphics travel from Linux through virtio-gpu and VirGL to the
 native Cocoa window. Storage, networking, audio, and input use their matching
 QEMU virtual devices and host backends.
 
+On macOS 26 or newer, before the real VM starts, the launcher asks the bundled
+QEMU to create a tiny disposable HVF machine with ARM virtualization extensions
+and Apple's platform GICv3. When that probe succeeds on M3 and newer Apple
+Silicon, the real guest starts at EL2 and Linux exposes `/dev/kvm`; on older
+chips the launcher keeps the existing platform-GIC/EL1 configuration. macOS 15
+skips the probe and always uses EL1: its paused probe can succeed even though
+QEMU later aborts with `HV_BAD_ARGUMENT` when synchronizing vCPU registers.
+An unavailable or unrecognized host version also keeps the EL1 configuration.
+The pinned QEMU 11.1.1 runtime contains the upstream HVF vGIC and
+nested-virtualization implementation.
+
+Trackpad magnification uses a dedicated indirect virtio touchpad alongside the
+ordinary pointer tablet. The Cocoa bridge reconstructs two contacts from each
+pinch and releases them on cancellation or focus loss; the guest disables
+tapping for this gesture-only device. See [pinch zoom](pinch-zoom.md) for the
+input contract, existing-guest setup, and integration validation.
+
 The macOS helper opens an authenticated connection to QEMU's private,
 single-client machine protocol socket before host sleep and retains that control
 session through wake. Before macOS sleeps it synchronously pauses the guest
@@ -112,6 +129,36 @@ is reading the camera. Camera permission, capture failure, or device removal is
 non-fatal to the VM; the launcher can restart the optional bridge without
 restarting Omarchy.
 
+A root-only authentication port
+(`dev.tryomarchy.authentication`) lets the guest's `sudo` PAM policy request a
+fixed-purpose macOS Touch ID prompt. Enrollment creates a non-exportable P-256
+signing key in the Mac's Secure Enclave for a root-private random guest ID and
+pins its public key inside that guest. The host stores the Secure Enclave's
+device-bound encrypted key representation outside the Keychain, so local ad-hoc
+test builds do not need a provisioned Keychain access group. Each authentication uses a new 256-bit
+challenge. The host signs a
+canonical payload that binds the request ID, challenge, PAM user, requesting
+user, `sudo` service, interactive TTY, guest ID, signing-key ID, and a 15-second validity
+window. The guest verifies that signature with OpenSSL before PAM can return
+success. It never accepts an unsigned approval boolean.
+
+The integration's binaries and root-only device rule are present in the factory
+image, but the sudo PAM policy remains unchanged until the user opts in through
+**Setup → Security → Touch ID for sudo**. The root control enrolls first and
+atomically adds the PAM rule only after successful guest-password and Touch ID
+authentication. Disable removes that exact rule before deleting guest state and
+requesting deletion of the corresponding host key representation. Re-pair runs
+the disable and enable transitions while preserving password fallback.
+
+The QEMU window must be frontmost, the QEMU process identity must still match,
+and the host owns both enrollment and sudo prompt text. When enabled, the PAM
+module is `sufficient`: a denial, missing enrollment, unavailable bridge,
+invalid signature, non-interactive request, or timeout falls through to
+Omarchy's normal password authentication. This integration does not authenticate
+login or screen-unlock flows, cannot bind approval to the exact sudo command
+because PAM does not expose it, and is not a general guest-to-host approval
+service.
+
 When a folder is chosen on the start menu, QEMU exports it over virtio-9p with
 `security_model=none`, so every host file operation runs as the Mac user and
 the Mac keeps real modes and ownership. A small QEMU patch adds
@@ -160,7 +207,8 @@ creates the account on first boot.
 - The Swift code is a separate macOS launcher and helper.
 - A few QEMU C and Objective-C files are patched before QEMU is compiled. These
   patches cover the Cocoa app identity, display behavior, graphics integration,
-  host audio-device routing, and shared-folder ownership mapping.
+  host audio-device routing, and shared-folder ownership mapping. Nested
+  virtualization uses QEMU's upstream Apple HVF implementation unchanged.
 - The pinned Omarchy runtime trees are copied from upstream. Reviewed temporary
   backports are applied strictly against declared file hashes and recorded in
   artifact provenance. Guest overlays add the QEMU and ARM64 integration around
@@ -175,7 +223,15 @@ creates the account on first boot.
 - The guest normally consumes upstream Arch Linux ARM packages. Hyprland is the
   documented exception: an upstream package is reproducibly rebuilt with a
   guarded rounded-border coverage patch for the VM graphics path, then held in
-  the guest's immutable local repository.
+  the guest's immutable local repository. While that pin still needs
+  `libaquamarine.so=13`, the factory rebuilds `aquamarine 0.14.0-2` from the
+  reviewed Arch PKGBUILD and upstream tarball, then rebuilds Hyprtoolkit
+  against that library. Both packages are provided by the disposable builder
+  repository and held alongside Hyprland on guest `IgnorePkg`; mixing the
+  newer mirror Hyprtoolkit with the older aquamarine cannot resolve. Source
+  and library hashes are verified, and build paths are remapped for repeatable
+  output. The ABI builder must pass from an empty cache before refreshing the
+  transaction lock.
 - The final Arch Linux ARM pacman files live under `/usr/share/try-omarchy/`.
   An Omarchy-supported `pre-refresh-pacman` hook restores them after a channel
   refresh writes its x86_64 templates to `/etc`; the upstream templates remain

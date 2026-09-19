@@ -41,6 +41,7 @@ mkdir -p \
 
 /bin/cp "$macos_dir/run-qemu-gpu.sh" "$resources/scripts/run-qemu-gpu.sh"
 /bin/cp "$macos_dir/qemu-port-forwarding.sh" "$resources/scripts/qemu-port-forwarding.sh"
+/bin/cp "$macos_dir/qemu-networking.sh" "$resources/scripts/qemu-networking.sh"
 chmod 755 "$resources/scripts/run-qemu-gpu.sh"
 chmod 644 "$resources/scripts/qemu-port-forwarding.sh"
 
@@ -66,7 +67,7 @@ case ${1:-} in
         ;;
     esac
     ;;
-  --bridge-native-audio|--bridge-native-clipboard|--bridge-native-camera)
+  --bridge-native-audio|--bridge-native-clipboard|--bridge-native-camera|--bridge-native-authentication)
     while kill -0 "$2" 2>/dev/null; do
       sleep 0.02
     done
@@ -84,6 +85,7 @@ cat >"$resources/runtime/bin/Try Omarchy" <<'SH'
 # OMARCHY_SDL_INPUT_DEVICE_NAME
 # OMARCHY_SDL_OUTPUT_DEVICE_NAME
 # guest_owner_uid guest_owner_gid
+# hv_vm_config_set_el2_enabled hv_gic_create
 case " $* " in
   *' -accel help '*) printf '%s\n' hvf ;;
   *' -machine help '*) printf '%s\n' 'virt                 ARM Virtual Machine' ;;
@@ -93,7 +95,7 @@ case " $* " in
     for device in \
       hda-micro intel-hda virtconsole virtserialport virtio-balloon-pci \
       virtio-9p-pci virtio-blk-pci virtio-gpu-gl-pci virtio-keyboard-pci \
-      virtio-net-pci virtio-rng-pci virtio-serial-pci virtio-tablet-pci; do
+      virtio-net-pci virtio-rng-pci virtio-serial-pci virtio-tablet-pci virtio-pinch-pci; do
       printf 'name "%s"\n' "$device"
     done
     ;;
@@ -108,6 +110,7 @@ case " $* " in
   *' -machine virt -netdev help '*) printf '%s\n' user ;;
   *' -machine virt -audiodev help '*) printf '%s\n' sdl ;;
   *' -device virtio-gpu-gl-pci,help '*) printf '%s\n' 'romfile=<str>' ;;
+  *' -machine virt,gic-version=3,virtualization=on '*' -qmp stdio '*) exit 0 ;;
   *)
     exec /usr/bin/python3 - "$@" <<'PY'
 import os
@@ -157,6 +160,7 @@ QEMU_PERSISTENT_STORAGE_QEMU_ADD_FD='fd=9,set=77,opaque=omarchy-persistent-lock'
 QEMU_SELECTED_DISK=''
 QEMU_SELECTED_STORAGE_MODE=''
 QEMU_PERSISTENT_STORAGE_DIRECTORY=''
+QEMU_PERSISTENT_STORAGE_ROOT=''
 QEMU_PERSISTENT_STORAGE_IDENTITY=''
 QEMU_SELECTED_KERNEL=''
 QEMU_SELECTED_INITRAMFS=''
